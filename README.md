@@ -58,7 +58,7 @@ docker-compose build
 ### トレーニング実行
 
 ```bash
-docker-compose up
+docker run --rm -v "$(pwd)":/app -w /app red-group-behavior-app python main.py
 ```
 
 初回実行時、エージェントは探索環境を 10 エピソード分学習します。

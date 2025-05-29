@@ -7,6 +7,7 @@ import datetime
 import os
 
 def main():
+    print("Starting main.py...")
     # 環境とモデルの初期化
     env = Env()
     input_dim = flatten_state(env.reset()).shape[0]
