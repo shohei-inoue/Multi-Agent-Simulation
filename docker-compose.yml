@@ -7,4 +7,4 @@ services:
     volumes:
       - .:/app  # 開発用にホストのコードをマウント（必要なければ削除可）
     working_dir: /app
-    command: python main.py
+    command: python -u main.py
