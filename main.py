@@ -33,9 +33,8 @@ def main():
     episodes = 10
     for ep in range(1, episodes + 1):
         total_reward = agent.train_one_episode()
-        gif_name = f"{timestamp_root}"
-        env.save_gif(episode=ep, date_time=gif_name)
-        print(f"Episode {ep}: reward = {total_reward}, GIF saved as {gif_name}.gif")
+        env.save_gif(episode=ep, date_time=timestamp_root)
+        print(f"Episode {ep}: reward = {total_reward}, GIF saved as ./gifs/{timestamp_root}/episode_{ep}.gif")
 
     print("Training finished and all GIFs saved.")
 

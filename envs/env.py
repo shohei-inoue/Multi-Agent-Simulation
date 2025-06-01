@@ -544,9 +544,8 @@ class Env(gym.Env):
     """
     保存したフレームをGIFとして保存
     """
-    path_name = f"{date_time}_episode_{episode}"
-    gif_dir = f"results/gif/{path_name}"
-    gif_name = f"{path_name}.gif"
+    gif_dir = f"./gifs/{date_time}"
+    gif_name = f"episode_{episode}.gif"
 
     os.makedirs(gif_dir, exist_ok=True)
     imageio.mimsave(
