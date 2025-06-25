@@ -1,15 +1,14 @@
 import gym
 import numpy as np
+import math
 
 def create_action_space():
   """
   action_space:
-    parameter k_e of the policy (continuity)  | (0 <= k_e < inf): float
-    parameter k_c of the policy (continuity)  | (0 <= k_c < inf): float
-    parameter th of the policy (continuity)   | (0 <= th < inf): float
+    - parameter theta of the policy (continuous) ∈ [0, 2π): float
+    - parameter mode of the policy (discrete) ∈ {0, 1, 2}: int
   """
   return gym.spaces.Dict({
-    "k_e"   : gym.spaces.Box(low=0.0, high=np.inf, shape=(), dtype=np.float32),
-    "k_c"   : gym.spaces.Box(low=0.0, high=np.inf, shape=(), dtype=np.float32),
-    "th"    : gym.spaces.Box(low=0.0, high=np.inf, shape=(), dtype=np.float32),
+      "theta": gym.spaces.Box(low=0.0, high=2 * math.pi, shape=(), dtype=np.float32),
+      "mode": gym.spaces.Discrete(3)
   })

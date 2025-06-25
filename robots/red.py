@@ -3,7 +3,16 @@ import math
 import pandas as pd
 import os
 import random
-from robots.red_parameter import RedParam, BoidsType
+from enum import Enum
+
+class BoidsType(Enum):
+    """
+    boids判断用のタイプ
+    """
+    NONE  = 0
+    OUTER = 1
+    INNER = 2
+
 
 class Red():
   """
@@ -12,8 +21,19 @@ class Red():
   def __init__(
     self,
     id: str,
-    env,
-    agent_position: np.array,
+    movement_min: float,
+    movement_max:float,
+    boids_min: float,
+    boids_max: float,
+    avoidance_min: float,
+    avoidance_max: float,
+    inner_boundary: float,
+    outer_boundary: float,
+    map: np.ndarray,
+    obstacle_value: int,
+    mean: float,
+    variance: float,
+    agent_coordinate: np.array,
     x: float,
     y: float,
     step: int = 0,
@@ -26,31 +46,50 @@ class Red():
     """
     initialize RED
     """
-    self.id: str                      = id
-    self.env                          = env
-    self.agent_position: np.array     = agent_position
+    self.id = id
+    # ----- robot control request parameter -----
+    self.__movement_min   = movement_min
+    self.__movement_max   = movement_max
+    self.__boids_min      = boids_min
+    self.__boids_max      = boids_max
+    self.__avoidance_min  = avoidance_min
+    self.__avoidance_max  = avoidance_max
+    self.__boundary_inner = inner_boundary
+    self.__boundary_outer = outer_boundary
+    self.__mv_mean        = mean
+    self.__mv_variance    = variance
+
+    # ----- map parameter -----
+    self.__map            = map
+    self.__map_height     = map.shape[0]
+    self.__map_width      = map.shape[1]
+    self.__obstacle_value = obstacle_value
+
+    # ----- robot initialize -----
+    self.agent_coordinate             = agent_coordinate
     self.x: float                     = x
     self.y: float                     = y
-    self.position: np.array           = np.array([self.y, self.x])
-    self.param: RedParam              = RedParam
+    self.coordinate: np.array         = np.array([self.y, self.x])
     self.step: int                    = step
     self.amount_of_movement: float    = amount_of_movement
     self.direction_angle: float       = direction_angle
-    self.distance: float              = np.linalg.norm(self.position - self.agent_position)
+    self.distance: float              = np.linalg.norm(self.coordinate - self.agent_coordinate)
     self.azimuth: float               = self.azimuth_adjustment()
     self.collision_flag: bool         = collision_flag
     self.boids_flag: BoidsType        = boids_flag
     self.estimated_probability: float = estimated_probability
+
+    # ----- data set -----
     self.data                         = self.get_arguments()
-    self.one_explore_data              = self.get_arguments()
+    self.one_explore_data             = self.get_arguments()
 
   
   def azimuth_adjustment(self) -> float:
     """
     エージェントから見た自身の方向（方位角）[0, 2π)
     """
-    dy = self.agent_position[0] - self.y
-    dx = self.agent_position[1] - self.x
+    dy = self.agent_coordinate[0] - self.y
+    dx = self.agent_coordinate[1] - self.x
     azimuth_rad = np.arctan2(dy, dx)
     azimuth_rad = azimuth_rad if azimuth_rad >= 0 else (2 * np.pi + azimuth_rad)
     return np.rad2deg(azimuth_rad)
@@ -65,7 +104,7 @@ class Red():
       'step':                   [self.step],
       'x':                      [self.x],
       'y':                      [self.y],
-      'position':               [self.position],
+      'coordinate':             [self.coordinate],
       'amount_of_movement':     [self.amount_of_movement],
       'direction_angle':        [self.direction_angle],
       'distance':               [self.distance],
@@ -90,22 +129,22 @@ class Red():
     行動制御
     """
     if self.collision_flag:
-      prediction_position = self.avoidance_behavior()
+      prediction_coordinate = self.avoidance_behavior()
     else:
       self.boids_judgement()
       if self.boids_flag != BoidsType.NONE:
-        prediction_position = self.boids_behavior()
+        prediction_coordinate = self.boids_behavior()
       else:
-        prediction_position = self.rejection_decision()
+        prediction_coordinate = self.rejection_decision()
     
-    self.position = self.forward_behavior(
-      prediction_position[0] - self.position[0],
-      prediction_position[1] - self.position[1]
+    self.coordinate = self.forward_behavior(
+      prediction_coordinate[0] - self.coordinate[0],
+      prediction_coordinate[1] - self.coordinate[1]
     )
 
-    self.y = self.position[0]
-    self.x = self.position[1]
-    self.distance = np.linalg.norm(self.position - self.agent_position)
+    self.y = self.coordinate[0]
+    self.x = self.coordinate[1]
+    self.distance = np.linalg.norm(self.coordinate - self.agent_coordinate)
     self.azimuth = self.azimuth_adjustment()
     self.step += 1
 
@@ -113,11 +152,11 @@ class Red():
     self.one_explore_data = pd.concat([self.one_explore_data])
   
 
-  def change_agent_state(self, agent_position) -> None:
+  def change_agent_state(self, agent_coordinate) -> None:
     """
     エージェントの状態が変化した場合の処理
     """  
-    self.agent_position = agent_position
+    self.agent_coordinate = agent_coordinate
     self.one_explore_data = self.get_arguments()
 
 
@@ -125,8 +164,8 @@ class Red():
     """
     障害物回避行動
     """
-    self.direction_angle = (self.direction_angle + random.uniform(self.param.MIN_AVOIDANCE_BEHAVIOR, self.param.MAX_AVOIDANCE_BEHAVIOR))
-    amount_of_movement = random.uniform(self.param.MIN_MOVEMENT, self.param.MAX_MOVEMENT)
+    self.direction_angle = (self.direction_angle + random.uniform(self.__avoidance_min, self.__avoidance_max))
+    amount_of_movement = random.uniform(self.__movement_min, self.__movement_max)
     dx = amount_of_movement * math.cos(math.radians(self.direction_angle))
     dy = amount_of_movement * math.sin(math.radians(self.direction_angle))
     return np.array([self.y + dy, self.x + dx])
@@ -136,10 +175,10 @@ class Red():
     """
     boids行動の判断
     """
-    self.distance = np.linalg.norm(self.position - self.agent_position)
-    if self.distance > self.env.param.OUTER_BOUNDARY:
+    self.distance = np.linalg.norm(self.coordinate - self.agent_coordinate)
+    if self.distance > self.__boundary_outer:
       self.boids_flag = BoidsType.OUTER
-    elif self.distance < self.env.param.INNER_BOUNDARY:
+    elif self.distance < self.__boundary_inner:
       self.boids_flag = BoidsType.INNER
     else:
       self.boids_flag = BoidsType.NONE
@@ -162,8 +201,8 @@ class Red():
         self.direction_angle = self.azimuth
 
     amount_of_movement = random.uniform(
-        self.param.MIN_BOIDS_MOVEMENT,
-        self.param.MAX_BOIDS_MOVEMENT
+        self.__boids_min,
+        self.__boids_max
     )
     angle_rad = math.radians(self.direction_angle)
 
@@ -185,12 +224,12 @@ class Red():
 
     while True:
       direction_angle = np.rad2deg(random.uniform(0.0, 2.0 * math.pi))
-      amount_of_movement = random.uniform(self.param.MIN_MOVEMENT, self.param.MAX_MOVEMENT)
+      amount_of_movement = random.uniform(self.__movement_min, self.__movement_max)
       dx = amount_of_movement * math.cos(math.radians(direction_angle))
       dy = amount_of_movement * math.sin(math.radians(direction_angle))
       prediction_position = np.array([self.y + dy, self.x + dx])
-      distance = np.linalg.norm(prediction_position - self.agent_position)
-      estimated_probability = distribution(distance, self.env.param.MEAN, self.env.param.VARIANCE)
+      distance = np.linalg.norm(prediction_position - self.agent_coordinate)
+      estimated_probability = distribution(distance, self.__mv_mean, self.__mv_variance)
       if self.estimated_probability == 0.0:
         self.estimated_probability = estimated_probability
         self.direction_angle = direction_angle
@@ -213,21 +252,21 @@ class Red():
 
     for i in range(1, SAMPLING_NUM + 1):
       intermediate_position = np.array([
-        self.position[0] + (dy * i / SAMPLING_NUM),
-        self.position[1] + (dx * i / SAMPLING_NUM)
+        self.coordinate[0] + (dy * i / SAMPLING_NUM),
+        self.coordinate[1] + (dx * i / SAMPLING_NUM)
       ])
 
-      if (0 < intermediate_position[0] < self.env.param.ENV_HEIGHT) and (0 < intermediate_position[1] < self.env.param.ENV_WIDTH):
+      if (0 < intermediate_position[0] < self.__map_height) and (0 < intermediate_position[1] < self.__map_width):
         map_y = int(intermediate_position[0])
         map_x = int(intermediate_position[1])
 
-        if self.env.map[map_y, map_x] == self.env.param.OBSTACLE_VALUE:
+        if self.__map[map_y, map_x] == self.__obstacle_value:
           # 障害物に衝突する事前位置を計算
           collision_position = intermediate_position
-          direction_vector = collision_position - self.position
+          direction_vector = collision_position - self.coordinate
           norm_direction_vector = np.linalg.norm(direction_vector)
 
-          stop_position = self.position + (direction_vector / norm_direction_vector) * (norm_direction_vector - SAFE_DISTANCE)
+          stop_position = self.coordinate + (direction_vector / norm_direction_vector) * (norm_direction_vector - SAFE_DISTANCE)
           self.collision_flag = True
           return stop_position
       else:
@@ -235,57 +274,7 @@ class Red():
     
     self.collision_flag = False
 
-    return self.position + np.array([dy, dx])
-  
-  
-  def sampling_collision_data(self, sample_num: int = 5, seed: int = 42):
-    """
-    衝突情報をサンプリングした形で取得
-    return:
-        {
-          "count": int,
-          "collision_samples": np.array([distance, azimuth] * sample_num),
-          "mask": 0 or 1
-        }
-    """
-    # 衝突のある情報のみを抽出
-    collision_data = self.data[self.data['collision_flag'] == True]
-    collision_count = len(collision_data)
-
-    if collision_count == 0:
-      # 衝突がなかった場合, maskでスキップ判定に使う
-      return {
-        "count": 0,
-        "collision_samples": np.array(
-          [[0.0, 0.0]] * sample_num,
-          dtype=np.float32
-        ),
-        "mask": 1
-      }
-    
-    # ランダムサンプリング(seed固定)
-    sampled_data = collision_data.sample(
-      n=min(sample_num, collision_count), 
-      replace=collision_count < sample_num, 
-      random_state=seed
-    )
-
-    # 必要な情報を取り出してリスト化
-    collision_samples = np.array([
-        [float(row["distance"]), float(row["azimuth"])]
-        for _, row in sampled_data.iterrows()
-    ], dtype=np.float32)
-
-    # サンプルが不足していたら padding
-    if len(collision_samples) < sample_num:
-        padding = np.array([[0.0, 0.0]] * (sample_num - len(collision_samples)), dtype=np.float32)
-        collision_samples = np.concatenate([collision_samples, padding], axis=0)
-    
-    return {
-        "count": collision_count,
-        "collision_samples": collision_samples,
-        "mask": 0
-    }
+    return self.coordinate + np.array([dy, dx])
 
 
   def get_collision_data(self) -> list:

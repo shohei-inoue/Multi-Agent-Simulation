@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-class ParamActorCritic(tf.keras.Model):
+class ModelActorCritic(tf.keras.Model):
   """
   Actor-Critic model with shared layers for policy and value function.
   This model outputs a probability distribution for actions and a value estimate.
@@ -10,11 +10,11 @@ class ParamActorCritic(tf.keras.Model):
   """
   def __init__(self, input_dim):
     """
-    Initializes the ParamActorCritic model.
+    Initializes the modelActorCritic model.
     Args:
       input_dim (int): The dimension of the input state.
     """
-    super(ParamActorCritic, self).__init__()
+    super(ModelActorCritic, self).__init__()
     super().__init__()
     self.shared_dense1 = tf.keras.layers.Dense(128, activation='relu')
     self.shared_dense2 = tf.keras.layers.Dense(64, activation='relu')
@@ -124,3 +124,12 @@ class ParamActorCritic(tf.keras.Model):
     grads = tape.gradient(loss, self.trainable_variables)
     optimizer.apply_gradients(zip(grads, self.trainable_variables))
     return loss, actor_loss, critic_loss
+  
+
+  # 末尾に追加（モデルが保存/ロード可能になる）
+  def get_config(self):
+    return {"input_dim": 32}  # input_dim は任意。環境依存で適宜設定。
+
+  @classmethod
+  def from_config(cls, config):
+    return cls(**config)

@@ -175,3 +175,7 @@ cython_debug/
 
 # GIFファイル出力を無視
 gifs/
+
+outputs
+
+logs
