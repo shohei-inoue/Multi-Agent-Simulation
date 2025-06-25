@@ -1,6 +1,8 @@
 import numpy as np
 import math
 import tensorflow as tf
+import os
+import csv
 
 class AlgorithmVfhFuzzy():
   KAPPA         = 1.0                                                 # 逆温度
@@ -24,7 +26,7 @@ class AlgorithmVfhFuzzy():
     self.k_c = k_c
 
 
-  def policy(self, state, sampled_params):
+  def policy(self, state, sampled_params, episode, log_dir: str = None):
     """
     行動決定ポリシー
     - 学習ありなら sampled_params を用いてパラメータを更新
@@ -70,10 +72,53 @@ class AlgorithmVfhFuzzy():
       "mode": mode
     }
 
+    # CSVログ保存（オプション）
+    if log_dir is not None:
+      self.save_algorithm_parameter_to_csv(
+        log_dir=log_dir,
+        episode=episode,
+        step=state.get("agent_step_count", 0),
+        params=(self.th, self.k_e, self.k_c),
+        drivability=drivability_histogram,
+        exploration=exploration_improvement_histogram,
+        result=result_histogram
+      )
+
     # numpy -> tensorに変換
     action_tensor = tf.convert_to_tensor(sampled_params, dtype=tf.float32)
 
     return action_tensor, action
+  
+
+  def save_algorithm_parameter_to_csv(self, log_dir: str, step: int,
+        episode: int,
+        params: tuple,
+        drivability: np.ndarray,
+        exploration: np.ndarray,
+        result: np.ndarray):
+    """
+    パラメータと各ヒストグラムをCSVに記録
+    """
+    csv_dir = os.path.join(log_dir, "csvs")
+    os.makedirs(csv_dir, exist_ok=True)
+
+    csv_path = os.path.join(csv_dir, f"algorithm_logs_{episode:04d}.csv")
+
+    # ヘッダ（最初のステップであれば追加）
+    if step == 0 and not os.path.exists(csv_path):
+      with open(csv_path, mode="w", newline="") as f:
+        writer = csv.writer(f)
+        header = ["step", "th", "k_e", "k_c"]
+        header += [f"drivability_{i}" for i in range(self.BIN_NUM)]
+        header += [f"exploration_{i}" for i in range(self.BIN_NUM)]
+        header += [f"result_{i}" for i in range(self.BIN_NUM)]
+        writer.writerow(header)
+
+    # データ書き込み
+    with open(csv_path, mode="a", newline="") as f:
+      writer = csv.writer(f)
+      row = [step, *params, *drivability.tolist(), *exploration.tolist(), *result.tolist()]
+      writer.writerow(row)
   
   
   def get_state_info(self, state, sampled_params):

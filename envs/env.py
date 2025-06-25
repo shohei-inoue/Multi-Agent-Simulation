@@ -210,7 +210,7 @@ class Env(gym.Env):
           self.__map,
           cmap='gray_r',
           origin='lower',
-          extent=[0, self.__map_width, 0, self.__map_height]
+          extent=[0, self.__map_width, 0, self.__map_height],
       )
 
       # 探査済み領域
@@ -233,6 +233,7 @@ class Env(gym.Env):
           y=self.agent_coordinate[0],
           color='blue',
           s=100,
+          label="agent"
       )
 
       # 軌跡
@@ -261,6 +262,7 @@ class Env(gym.Env):
               y=follower.data['y'].iloc[-1],
               color='red',
               s=10,
+              label="follower"
           )
           ax.plot(
               follower.data['x'],
@@ -281,8 +283,8 @@ class Env(gym.Env):
 
       # ----- adjust layout -----
       plt.tight_layout()
-      plt.show()           # コメントアウトでoff
-      plt.pause(0.01)      # コメントアウトでoff
+      # plt.show()           # コメントアウトでoff
+      # plt.pause(0.01)      # コメントアウトでoff
 
       # ----- save frames -----
       if save_frames:
@@ -322,6 +324,7 @@ class Env(gym.Env):
     
     # エージェントのステップカウントをインクリメント
     self.agent_step += 1
+    self.state['agent_step_count'] = self.agent_step
     
     # フォロワの探査行動
     for _ in range(self.__offset.one_explore_step):

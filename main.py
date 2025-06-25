@@ -18,7 +18,7 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     # --- サブディレクトリ作成 ---
-    subdirs = ["metrics", "gifs", "models", "tensorboard"]
+    subdirs = ["metrics", "gifs", "models", "tensorboard", "csvs"]
     for sub in subdirs:
         os.makedirs(os.path.join(log_dir, sub), exist_ok=True)
 
@@ -26,7 +26,7 @@ def main():
     env = Env(param=param)
 
     # --- 環境パラメータ保存 ---
-    env_info_path = os.path.join(log_dir, "env_info.csv")
+    env_info_path = os.path.join(log_dir, "csvs/env_info.csv")
     pd.DataFrame({
         "map_width": [param.environment.map.width],
         "map_height": [param.environment.map.height],

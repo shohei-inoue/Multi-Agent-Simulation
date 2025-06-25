@@ -12,7 +12,7 @@ def create_reward():
     'default'                   : -1,
     'exploration_gain'          : +5,
     'revisit_penalty'           : -2,
-    'collision_penalty'         : -20,
+    'collision_penalty'         : -10,
     'clear_target_rate'         : +50,
     'none_finish_penalty'       : -50,
   }

@@ -30,7 +30,7 @@ class A2CAgent(BaseAgent):
     self.action_space          = action_space
   
 
-  def get_action(self, state): # stateは辞書型で送られてくる
+  def get_action(self, state, episode, log_dir: str = None): # stateは辞書型で送られてくる
     # 状態をテンソルに変換
     state_vec = tf.convert_to_tensor([flatten_state(state)], dtype=tf.float32)
 
@@ -42,7 +42,7 @@ class A2CAgent(BaseAgent):
     sampled_params_np = sampled_params[0].numpy()
 
     # アルゴリズムにより行動を決定
-    action_tensor, action_dict = self.algorithm.policy(state, sampled_params_np)
+    action_tensor, action_dict = self.algorithm.policy(state, sampled_params_np, episode=episode, log_dir=log_dir)
 
     # Tensor（学習用）と Dict（環境用）を返す
     return action_tensor, action_dict
@@ -54,7 +54,7 @@ class A2CAgent(BaseAgent):
     step_logs = []
 
     for step_idx in range(self.n_steps):
-        action_tensor, action_dict = self.get_action(state)
+        action_tensor, action_dict = self.get_action(state, episode, log_dir=csv_path)
         next_state, reward, done, turncated, infos = self.env.step(action_dict)
 
         # ログ構築
@@ -118,7 +118,7 @@ class A2CAgent(BaseAgent):
     step_count = 0
 
     while not done and step_count < self.max_steps_per_episode:
-      states, actions, rewards, dones, next_states, next_state = self.collect_trajectory(state, episode=episode)
+      states, actions, rewards, dones, next_states, next_state = self.collect_trajectory(state, episode=episode, csv_path=log_dir)
       returns, advantages = self.compute_returns_and_advantages(states, rewards, dones, next_states)
 
       self.model.train_step(
@@ -165,9 +165,9 @@ class A2CAgent(BaseAgent):
     """
     df = pd.DataFrame(step_logs)
     df.insert(0, "episode", episode)
-
-    os.makedirs(csv_path, exist_ok=True)
-    file_path = os.path.join(csv_path, f"episode_{episode:04d}.csv")
+    csv_dir = os.path.join(csv_path, "csvs")
+    os.makedirs(csv_dir, exist_ok=True)
+    file_path = os.path.join(csv_path, f"trajectory_episode_{episode:04d}.csv")
     df.to_csv(file_path, index=False)
   
 

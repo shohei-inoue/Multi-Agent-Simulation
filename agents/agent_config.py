@@ -64,14 +64,14 @@ class AgentConfig:
     )
   
   
-  def get_action(self, state):
+  def get_action(self, state, episode, log_dir: str = None):
     """
     行動を取得する
     """
     if self.__is_learning:
-      action_tensor, action_dict = self.__agent.get_action(state)
+      action_tensor, action_dict = self.__agent.get_action(state, episode, log_dir)
     else:
-      action_tensor, action_dict = self.__agent.policy(state)
+      action_tensor, action_dict = self.__agent.policy(state, episode, log_dir)
     
     return action_tensor, action_dict
       
