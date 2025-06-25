@@ -6,8 +6,6 @@
 
 - 探索環境は障害物を含む 2 次元グリッドマップ
 - フォロワーロボットは RED モデルに基づく確率密度制御で動作
-- リーダーロボットは VFH + ファジィ推論によって最適方向を決定
-- 強化学習（A2C）によりパラメータ `th`, `k_e`, `k_c` をオンライン最適化
 
 ---
 
@@ -26,23 +24,21 @@ red-group-behavior/
 ├── Dockerfile                     # Docker ビルド定義
 ├── docker-compose.yml             # 開発用コンテナ構成
 ├── requirements.txt               # Python 依存パッケージ一覧
-
-├── agents/
+├── algorithm/                     # アルゴリズム関連
+├── agents/                        # エージェント関連
 │   └── a2c.py                     # A2C エージェント定義
-
-├── envs/
+├── envs/                          # 環境関連
 │   ├── env.py                     # 探索環境 (gym.Env)
 │   ├── env_parameter.py           # 環境パラメータ定義
 │   ├── action_space.py            # アクション空間生成
 │   └── observation_space.py       # 状態空間生成
-
-├── models/
+├── models/                        # モデル関連
 │   └── actor_critic.py            # ParamActorCritic モデル
-
-├── utils/
+├── params/                        # パラメータ関連
+├── utils/                         # ユーティリティ処理等
 │   └── utils.py                   # 状態変換などの補助関数
-
-└── robots/
+├── scores/                        # スコア関連
+└── robots/                        # ロボット関連
     ├── red.py                     # REDクラス（フォロワー挙動）
     └── red_parameter.py           # REDのパラメータ定義
 ```
@@ -61,14 +57,17 @@ docker-compose build
 docker-compose up --build
 ```
 
-初回実行時、エージェントは探索環境を 10 エピソード分学習します。
-結果は results/gif/ 以下に GIF として自動保存されます。
-
 ## 環境構築（ローカルで実行する場合）
 
 ```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-python main.py
+python3 main.py
 ```
+
+## TODO 
+
+- 各種scoreの作成, 取得
+- 動作csv作成, 取得
+- csvを用いたgif作成関数の作成
