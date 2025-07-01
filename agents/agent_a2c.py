@@ -22,6 +22,13 @@ class A2CAgent(BaseAgent):
       max_steps_per_episode,
       action_space
     ):
+    # ---- gpu logs -----
+    print("[TensorFlow Device Check]")
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+      print(f"✅ GPU available: {gpus}")
+    else:
+      print("❌ No GPU detected. Training will use CPU.")
     # ----- request settings -----
     self.env                   = env
     self.algorithm             = algorithm
