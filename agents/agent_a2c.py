@@ -166,7 +166,7 @@ class A2CAgent(BaseAgent):
 
   def setup_rendering(self):
     self.env.capture_frame = self.capture_frame
-    plt.ion()
+    # plt.ion() # 描画off はコメントアウト
 
     # 3列 x 4行 のグリッドに調整（2行目はスペーサー）
     fig = plt.figure(figsize=(12, 14))
@@ -195,7 +195,7 @@ class A2CAgent(BaseAgent):
     self.algorithm._ax_polar = ax_polar
     self.algorithm._render_flag = True
 
-    fig.show()
+    # fig.show()　# 描画off はコメントアウト
     return fig
   
 
