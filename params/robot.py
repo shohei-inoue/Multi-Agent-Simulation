@@ -31,7 +31,7 @@ class Offset:
   collision_flag        : bool      = False
   boids_flag            : BoidsType = BoidsType.NONE
   estimated_probability : float     = 0.0
-  one_explore_step      : int       = 100
+  one_explore_step      : int       = 80
 
 
 

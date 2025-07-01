@@ -6,6 +6,9 @@ import numpy as np
 import pandas as pd
 import os
 from typing import List, Dict, Any
+import matplotlib.pyplot as plt
+from PIL import Image
+import io
 
 class A2CAgent(BaseAgent):
   def __init__(
@@ -112,6 +115,9 @@ class A2CAgent(BaseAgent):
   
 
   def train_one_episode(self, episode: int = 0, log_dir: str = None):
+    self.env_frames = []
+    self.current_fig = self.setup_rendering()
+
     state = self.env.reset()
     total_reward = 0
     done = False
@@ -129,13 +135,22 @@ class A2CAgent(BaseAgent):
         tf.convert_to_tensor(advantages, dtype=tf.float32),
       )
 
+      # 可視化更新（統合）
+      if hasattr(self.env, "render") and self.env._render_flag:
+          self.env.render(ax=self.env._render_ax)
+      if hasattr(self.algorithm, "render") and self.algorithm._render_flag:
+          self.algorithm.render(ax_params=self.algorithm._ax_params, ax_polar=self.algorithm._ax_polar)
+      
+      # フレームキャプチャ
+      self.capture_frame()
+
       total_reward += sum(rewards)
       done = dones[-1]
       state = next_state if not done else self.env.reset()
       step_count += 1 # ステップ数更新
     
     # 終了後にログ出力
-    if log_dir:
+      self.save_gif(log_dir, episode)
       self.save_metrics(log_dir, episode, total_reward)
       self.save_model(log_dir, episode)
       self.log_tensorboard(log_dir, episode, total_reward)
@@ -147,6 +162,76 @@ class A2CAgent(BaseAgent):
      for episode in range(episodes):
         total_reward = self.train_one_episode(episode=episode, csv_path=csv_path)
         print(f"Episode {episode + 1}: Total Reward = {total_reward}")
+  
+
+  def setup_rendering(self):
+    self.env.capture_frame = self.capture_frame
+    plt.ion()
+
+    # 3列 x 4行 のグリッドに調整（2行目はスペーサー）
+    fig = plt.figure(figsize=(12, 14))
+    gs = fig.add_gridspec(4, 3, height_ratios=[2.5, 1, 0.2, 1.5])  # 2行目に空行
+
+    ax_env = fig.add_subplot(gs[0, :])  # 環境は横幅全部
+
+    ax_params = [
+        fig.add_subplot(gs[1, 0]),  # th
+        fig.add_subplot(gs[1, 1]),  # k_e
+        fig.add_subplot(gs[1, 2])   # k_c
+    ]
+
+    ax_polar = [
+        fig.add_subplot(gs[3, 0], polar=True),  # drivability
+        fig.add_subplot(gs[3, 1], polar=True),  # exploration
+        fig.add_subplot(gs[3, 2], polar=True)   # result
+    ]
+
+    fig.subplots_adjust(hspace=1.2)  # 余白を広めに
+    fig.tight_layout()
+
+    self.env._render_ax = ax_env
+    self.env._render_flag = True
+    self.algorithm._ax_params = ax_params
+    self.algorithm._ax_polar = ax_polar
+    self.algorithm._render_flag = True
+
+    fig.show()
+    return fig
+  
+
+  def capture_frame(self):
+    buf = io.BytesIO()
+    self.current_fig.savefig(buf, format='png')
+    buf.seek(0)
+    img = Image.open(buf).convert("RGB")
+
+    # サイズ統一処理
+    if hasattr(self, "frame_size"):
+        img = img.resize(self.frame_size)
+    else:
+        self.frame_size = img.size  # 初回にサイズを保存
+
+    self.env_frames.append(img)
+    buf.close()
+  
+
+  def save_gif(self, save_dir: str, episode: int):
+    from pathlib import Path
+    gif_dir = Path(save_dir) / "gifs"
+    gif_dir.mkdir(parents=True, exist_ok=True)
+    gif_path = gif_dir / f"episode_{episode:04d}.gif"
+    
+    if self.env_frames:
+        self.env_frames[0].save(
+            gif_path,
+            save_all=True,
+            append_images=self.env_frames[1:],
+            duration=100,  # 100ms/frame
+            loop=0
+        )
+        print(f"[Saved GIF] {gif_path}")
+    
+    self.env_frames.clear()
   
 
   def save_trajectory_to_csv(
