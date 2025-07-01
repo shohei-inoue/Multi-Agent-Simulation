@@ -22,6 +22,13 @@ class A2CAgent(BaseAgent):
       max_steps_per_episode,
       action_space
     ):
+    # ---- gpu logs -----
+    print("[TensorFlow Device Check]")
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+      print(f"✅ GPU available: {gpus}")
+    else:
+      print("❌ No GPU detected. Training will use CPU.")
     # ----- request settings -----
     self.env                   = env
     self.algorithm             = algorithm
@@ -166,7 +173,7 @@ class A2CAgent(BaseAgent):
 
   def setup_rendering(self):
     self.env.capture_frame = self.capture_frame
-    plt.ion()
+    # plt.ion() # 描画off はコメントアウト
 
     # 3列 x 4行 のグリッドに調整（2行目はスペーサー）
     fig = plt.figure(figsize=(12, 14))
@@ -195,7 +202,7 @@ class A2CAgent(BaseAgent):
     self.algorithm._ax_polar = ax_polar
     self.algorithm._render_flag = True
 
-    fig.show()
+    # fig.show()　# 描画off はコメントアウト
     return fig
   
 

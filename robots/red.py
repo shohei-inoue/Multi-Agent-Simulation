@@ -83,6 +83,9 @@ class Red():
     self.data                         = self.get_arguments()
     self.one_explore_data             = self.get_arguments()
 
+    # ----- buffer -----
+    self._data_buffer = []
+
   
   def azimuth_adjustment(self) -> float:
     """
@@ -113,6 +116,22 @@ class Red():
       'boids_flag':             [self.boids_flag],
       'estimated_probability':  [self.estimated_probability],
     })
+  
+
+  def get_arguments_dict(self):
+    return {
+        'step': self.step,
+        'x': self.x,
+        'y': self.y,
+        'coordinate': self.coordinate.copy(),
+        'amount_of_movement': self.amount_of_movement,
+        'direction_angle': self.direction_angle,
+        'distance': self.distance,
+        'azimuth': self.azimuth,
+        'collision_flag': self.collision_flag,
+        'boids_flag': self.boids_flag.value,
+        'estimated_probability': self.estimated_probability,
+    }
   
 
   def get_csv(self, episode, data_time):
@@ -149,8 +168,30 @@ class Red():
     self.azimuth = self.azimuth_adjustment()
     self.step += 1
 
-    self.data = pd.concat([self.data, self.get_arguments()])
-    self.one_explore_data = pd.concat([self.one_explore_data])
+    # self.data = pd.concat([self.data, self.get_arguments()])
+    # self.one_explore_data = pd.concat([self.one_explore_data])
+
+    self._data_buffer.append([
+        self.step,
+        self.x, self.y,
+        self.coordinate.copy(),
+        self.amount_of_movement,
+        self.direction_angle,
+        self.distance,
+        self.azimuth,
+        self.collision_flag,
+        self.boids_flag.value,
+        self.estimated_probability
+    ])
+
+  
+  def finalize_data(self):
+    columns = [
+        'step', 'x', 'y', 'coordinate', 'amount_of_movement',
+        'direction_angle', 'distance', 'azimuth',
+        'collision_flag', 'boids_flag', 'estimated_probability'
+    ]
+    self.data = pd.DataFrame(self._data_buffer, columns=columns)
   
 
   def change_agent_state(self, agent_coordinate) -> None:
@@ -220,7 +261,7 @@ class Red():
       """
       正規分布
       """
-      return 1 / math.sqrt(2 * math.pi) * math.exp(-(distance - mean) ** 2 / (2 * variance ** 2))
+      return np.exp(-(distance - mean) ** 2 / (2 * variance ** 2)) / np.sqrt(2 * np.pi)
     
 
     while True:
@@ -245,54 +286,41 @@ class Red():
   
 
   def forward_behavior(self, dy, dx) -> np.array:
-    """
-    直進行動処理
-    """
-    SAMPLING_NUM = max(150, int(np.ceil(np.linalg.norm([dy, dx]) * 10)))
-    SAFE_DISTANCE = 1.0 # マップの安全距離
+    steps = np.linspace(1, 0, num=max(150, int(np.ceil(np.hypot(dy, dx) * 10))))[:, None]
+    deltas = np.array([dy, dx])[None, :] * steps
+    positions = self.coordinate + deltas
 
-    for i in range(1, SAMPLING_NUM + 1):
-      intermediate_position = np.array([
-        self.coordinate[0] + (dy * i / SAMPLING_NUM),
-        self.coordinate[1] + (dx * i / SAMPLING_NUM)
-      ])
+    ys = positions[:, 0].astype(int)
+    xs = positions[:, 1].astype(int)
 
-      if (0 < intermediate_position[0] < self.__map_height) and (0 < intermediate_position[1] < self.__map_width):
-        map_y = int(intermediate_position[0])
-        map_x = int(intermediate_position[1])
+    valid = (0 < ys) & (ys < self.__map_height) & (0 < xs) & (xs < self.__map_width)
 
-        if self.__map[map_y, map_x] == self.__obstacle_value:
-          # 障害物に衝突する事前位置を計算
-          collision_position = intermediate_position
-          direction_vector = collision_position - self.coordinate
-          norm_direction_vector = np.linalg.norm(direction_vector)
+    for pos, y, x in zip(positions[valid], ys[valid], xs[valid]):
+        if self.__map[y, x] == self.__obstacle_value:
+            direction = pos - self.coordinate
+            norm = np.linalg.norm(direction)
+            stop = self.coordinate + (direction / norm) * (norm - 1.0)
+            self.collision_flag = True
+            return stop
 
-          stop_position = self.coordinate + (direction_vector / norm_direction_vector) * (norm_direction_vector - SAFE_DISTANCE)
-          self.collision_flag = True
-          return stop_position
-      else:
-        continue
-    
     self.collision_flag = False
-
     return self.coordinate + np.array([dy, dx])
 
 
   def get_collision_data(self) -> list:
     """
-    衝突情報を取得
+    衝突情報（azimuth, distance）を抽出してリストで返す
     """
-    # 衝突のある情報のみを抽出
-    collision_data = self.data[self.data['collision_flag'] == True]
-
-    # 衝突情報がない場合は空のリストを返す
-    if len(collision_data) == 0:
-      return []
-    
-    return [
-      (float(row["azimuth"]), float(row['distance']))
-      for _, row in collision_data.iterrows()
-    ]
+    if hasattr(self, 'data') and not self.data.empty:
+        # NumPyで抽出
+        mask = self.data['collision_flag'].values.astype(bool)
+        if not mask.any():
+            return []
+        azimuths = self.data['azimuth'].values[mask]
+        distances = self.data['distance'].values[mask]
+        return list(zip(azimuths, distances))
+    else:
+        return []
     
 
 
