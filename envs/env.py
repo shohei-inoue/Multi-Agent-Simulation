@@ -4,10 +4,9 @@ import math
 import matplotlib.pyplot as plt
 import matplotlib.colors as mColors
 from matplotlib.patches import Circle
-from PIL import Image
-import io
 import os
 import imageio
+import copy
 
 from envs.env_map import generate_explored_map, generate_rect_obstacle_map
 from .action_space import create_action_space
@@ -22,14 +21,9 @@ class Env(gym.Env):
   環境
   """
   def __init__(self, param=Param, action_space=None, observation_space=None, reward_dict=None):
-    """
-    移動方向 → VFHにより決定
-    走行可能性
-    探査向上性
-    """
     super().__init__()
 
-    # environment
+    # map
     self.__map_width            = param.environment.map.width
     self.__map_height           = param.environment.map.height
     self.__map_seed             = param.environment.map.seed
@@ -58,7 +52,7 @@ class Env(gym.Env):
     self.__finish_step          = param.explore.finishStep
 
 
-    self.action_space      = action_space or create_action_space()
+    self.action_space        = action_space or create_action_space()
     self.__observation_space = observation_space or create_observation_space()
     self.__reward_dict       = reward_dict or create_reward()
 
@@ -95,7 +89,6 @@ class Env(gym.Env):
     self.agent_previous_coordinate           = self.__agent_initial_previous_coordinate 
 
     # ----- set drawing infos -----
-    # TODO まだやっていない
     self.agent_trajectory = [self.agent_coordinate.copy()] # 奇跡の初期化
     self.env_frames = [] # 描画用フレームの初期化
 
@@ -132,7 +125,7 @@ class Env(gym.Env):
       self.__agent_initial_coordinate[1],
       self.__agent_initial_coordinate[0],
       azimuth=0,          # TODO どうするか,
-      collision_flag=0,   # TODO どうするか
+      collision_flag=0,   
       agent_step_count=self.agent_step,
       follower_collision_data=initial_fcd
     )
@@ -147,9 +140,10 @@ class Env(gym.Env):
     # ----- reset explore infos -----
     self.agent_step = 0 # ステップ初期化
     self.agent_coordinate = self.__agent_initial_coordinate # エージェントの位置情報の初期化
-    self.previous_agent_coordinate = self.__agent_initial_previous_coordinate # 1ステップ前の位置情報の初期化
+    self.agent_previous_coordinate = self.__agent_initial_previous_coordinate # 1ステップ前の位置情報の初期化
     self.explored_area = 0 # 探査済みエリアの初期化
-    self.exploration_ratio = 0
+    self.exploration_ratio = 0.0
+    self.collision_flag = False
     self.explored_map = generate_explored_map(
       map_width=self.__map_width,
       map_height=self.__map_height
@@ -187,12 +181,12 @@ class Env(gym.Env):
 
     # ----- reset state -----
     self.scorer = Score()
-    self.state = self.__initial_state
+    self.state = copy.deepcopy(self.__initial_state)
 
     return self.state
   
 
-  def render(self, fig_size = 6, save_frames = False, mode='human'):
+  def render(self, fig_size = 6, mode = 'human', ax = None):
     """
     環境のレンダリング
     マップの描画
@@ -202,8 +196,11 @@ class Env(gym.Env):
     if mode == 'rgb_gray':
       pass
     elif mode == 'human':
-      plt.ion()  # ← これがあると画面が更新されるようになる
-      fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+      # plt.ion()  # ← これがあると画面が更新されるようになる
+      if ax is None:
+        fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+      else:
+        ax.clear()
 
       # 地図
       ax.imshow(
@@ -256,13 +253,13 @@ class Env(gym.Env):
       ax.add_patch(explore_area)
 
       # フォロワの描画
-      for follower in self.follower_robots:
+      for i, follower in enumerate(self.follower_robots):
           ax.scatter(
               x=follower.data['x'].iloc[-1],
               y=follower.data['y'].iloc[-1],
               color='red',
               s=10,
-              label="follower"
+              label="follower" if i == 0 else None
           )
           ax.plot(
               follower.data['x'],
@@ -279,23 +276,6 @@ class Env(gym.Env):
       ax.set_xlabel('X')
       ax.set_ylabel('Y')
       ax.grid(False)
-      ax.legend()
-
-      # ----- adjust layout -----
-      plt.tight_layout()
-      # plt.show()           # コメントアウトでoff
-      # plt.pause(0.01)      # コメントアウトでoff
-
-      # ----- save frames -----
-      if save_frames:
-        buf = io.BytesIO()
-        fig.savefig(buf, format='png')
-        buf.seek(0)
-        img = Image.open(buf)
-        self.env_frames.append(np.array(img))
-        buf.close()
-      
-      plt.close(fig)
   
 
   def step(self, action):
@@ -334,14 +314,19 @@ class Env(gym.Env):
         self.update_exploration_map(previous_coordinate, self.follower_robots[index].coordinate)
       
       # レンダリング
-      self.render(6, save_frames=True, mode='human')
+      if hasattr(self, "_render_flag") and self._render_flag:
+        self.render(ax=self._render_ax)
+        self._render_ax.figure.canvas.draw()
+        self._render_ax.figure.canvas.flush_events()
+        if hasattr(self, "capture_frame"):
+            self.capture_frame()
 
       MAX_COLLISION_NUM = 100
 
       # フォロワから衝突データ収集
       follower_collision_data = []
       for follower in self.follower_robots:
-          follower_collision_data.extend(follower.get_collision_data())  # List[Tuple[float, float]]
+          follower_collision_data.extend(follower.get_collision_data())  # List[Tuple[float, float]] # distance, azimuth
           self.scorer.follower_collision_count += len(follower_collision_data)
 
       # MAX_COLLISION_NUM 個だけ使う（足りない分はゼロ埋め）
@@ -349,8 +334,7 @@ class Env(gym.Env):
       padded_list = follower_collision_data[:MAX_COLLISION_NUM]
       padding_needed = MAX_COLLISION_NUM - len(padded_list)
 
-      # np.ndarray([azimuth, distance]) の list に統一
-      fcd_ndarray = [np.array([azimuth, distance], dtype=np.float32) for distance, azimuth in padded_list]
+      fcd_ndarray = [np.array(pair, dtype=np.float32) for pair in padded_list]
       fcd_ndarray.extend([np.array([0.0, 0.0], dtype=np.float32)] * padding_needed)
 
       self.state['follower_collision_data'] = fcd_ndarray

@@ -22,7 +22,7 @@ def create_observation_space() -> gym.spaces.Dict:
     "follower_collision_data": gym.spaces.Box(
             low=0.0,
             high=np.inf,
-            shape=(MAX_COLLISION_NUM * 2,),  # distance と azimuth
+            shape=(MAX_COLLISION_NUM * 2,),  # distance と azimuth # TODO azimuthがどちらから見たazimuthなのか確認
             dtype=np.float32
         ),
   })

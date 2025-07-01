@@ -34,7 +34,7 @@ class AgentConfig:
         algorithm             = self.__algorithm,
         type                  = self.__learning_type,
         model                 = self.__model,
-        learning_late          = self.__learning_late,
+        learning_late         = self.__learning_late,
         optimizer             = param.learningParameter.optimizer,
         gamma                 = param.learningParameter.gamma,
         n_steps               = param.learningParameter.nStep,
@@ -83,6 +83,8 @@ class AgentConfig:
     oneエピソード分の学習
     """
     total_reward = self.__agent.train_one_episode(episode, log_dir=log_dir) # 報酬を返している
+
+    # TODO 非学習の場合の処理を追加
 
     # === GIF 保存 ===
     self.__env.save_gif(log_dir=log_dir, episode=episode)
@@ -164,6 +166,6 @@ class AgentConfig:
     model_dir = os.path.join(log_dir, "models")
     os.makedirs(model_dir, exist_ok=True)
 
-    model_path = os.path.join(model_dir, "agent_model")
+    model_path = os.path.join(model_dir, "agent_model.keras")
     self.__model.model.save(model_path)
     print(f"Model saved to {model_path}")

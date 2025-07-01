@@ -117,6 +117,7 @@ class Red():
 
   def get_csv(self, episode, data_time):
     """
+    TODO 上位層からlog_dirを取得して同じ階層に入れたい
     データをcsv形式で取得
     """
     directory = f"csv/{data_time}_episode{episode}"
@@ -289,7 +290,7 @@ class Red():
       return []
     
     return [
-      (float(row["distance"]), float(row['azimuth']))
+      (float(row["azimuth"]), float(row['distance']))
       for _, row in collision_data.iterrows()
     ]
     
