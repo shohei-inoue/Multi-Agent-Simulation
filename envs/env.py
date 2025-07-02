@@ -75,7 +75,7 @@ class Env(gym.Env):
     self.scorer = Score()
 
     # ----- set explore infos -----
-    self.total_area             = np.prod((self.__map.shape) - np.sum(self.__map == self.__obstacle_value)) # 探査可能エリア
+    self.total_area = np.count_nonzero(self.__map != self.__obstacle_value)  # 探査可能エリア
     self.explored_area          = 0    # 探査したセル数
     self.exploration_ratio      = 0.0  # 1ステップ前の探査率
     self.agent_step             = 0    # エージェントのステップ
@@ -345,6 +345,7 @@ class Env(gym.Env):
         explored_area=self.explored_area,
         total_area=self.total_area
       )
+      print(f"exploration ratio | {self.exploration_ratio}")
     
     # ----- calculate reward -----
     # デフォルト報酬
