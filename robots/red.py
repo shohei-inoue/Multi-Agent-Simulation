@@ -168,8 +168,8 @@ class Red():
     self.azimuth = self.azimuth_adjustment()
     self.step += 1
 
-    # self.data = pd.concat([self.data, self.get_arguments()])
-    # self.one_explore_data = pd.concat([self.one_explore_data])
+    self.data = pd.concat([self.data, self.get_arguments()])
+    self.one_explore_data = pd.concat([self.one_explore_data])
 
     self._data_buffer.append([
         self.step,
@@ -183,6 +183,10 @@ class Red():
         self.boids_flag.value,
         self.estimated_probability
     ])
+
+    if np.isnan(self.coordinate).any():
+      print(f"[ERROR] Red({self.id}) has NaN coordinate after move: {self.coordinate}")
+
 
   
   def finalize_data(self):
@@ -285,23 +289,56 @@ class Red():
           continue
   
 
+  # def forward_behavior(self, dy, dx) -> np.array:
+  #   steps = np.linspace(1, 0, num=max(150, int(np.ceil(np.hypot(dy, dx) * 10))))[:, None]
+  #   deltas = np.array([dy, dx])[None, :] * steps
+  #   positions = self.coordinate + deltas
+
+  #   ys = positions[:, 0].astype(int)
+  #   xs = positions[:, 1].astype(int)
+
+  #   valid = (0 < ys) & (ys < self.__map_height) & (0 < xs) & (xs < self.__map_width)
+
+  #   for pos, y, x in zip(positions[valid], ys[valid], xs[valid]):
+  #       if self.__map[y, x] == self.__obstacle_value:
+  #           direction = pos - self.coordinate
+  #           norm = np.linalg.norm(direction)
+  #           stop = self.coordinate + (direction / norm) * (norm - 1.0)
+  #           self.collision_flag = True
+  #           return stop
+
+  #   self.collision_flag = False
+  #   return self.coordinate + np.array([dy, dx])
+
+
   def forward_behavior(self, dy, dx) -> np.array:
-    steps = np.linspace(1, 0, num=max(150, int(np.ceil(np.hypot(dy, dx) * 10))))[:, None]
-    deltas = np.array([dy, dx])[None, :] * steps
-    positions = self.coordinate + deltas
+    """
+    直進行動処理
+    """
+    SAMPLING_NUM = max(150, int(np.ceil(np.linalg.norm([dy, dx]) * 10)))
+    SAFE_DISTANCE = 1.0 # マップの安全距離
 
-    ys = positions[:, 0].astype(int)
-    xs = positions[:, 1].astype(int)
+    for i in range(1, SAMPLING_NUM + 1):
+      intermediate_position = np.array([
+        self.coordinate[0] + (dy * i / SAMPLING_NUM),
+        self.coordinate[1] + (dx * i / SAMPLING_NUM)
+      ])
 
-    valid = (0 < ys) & (ys < self.__map_height) & (0 < xs) & (xs < self.__map_width)
+      if (0 < intermediate_position[0] < self.__map_height) and (0 < intermediate_position[1] < self.__map_width):
+        map_y = int(intermediate_position[0])
+        map_x = int(intermediate_position[1])
 
-    for pos, y, x in zip(positions[valid], ys[valid], xs[valid]):
-        if self.__map[y, x] == self.__obstacle_value:
-            direction = pos - self.coordinate
-            norm = np.linalg.norm(direction)
-            stop = self.coordinate + (direction / norm) * (norm - 1.0)
-            self.collision_flag = True
-            return stop
+        if self.__map[map_y, map_x] == self.__obstacle_value:
+          # 障害物に衝突する事前位置を計算
+          collision_position = intermediate_position
+          direction_vector = collision_position - self.coordinate
+          norm_direction_vector = np.linalg.norm(direction_vector)
+
+          stop_position = self.coordinate + (direction_vector / norm_direction_vector) * (norm_direction_vector - SAFE_DISTANCE)
+          self.collision_flag = True
+          return stop_position
+      else:
+        continue
 
     self.collision_flag = False
     return self.coordinate + np.array([dy, dx])

@@ -4,7 +4,7 @@ import tensorflow as tf
 import os
 import csv
 import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
+
 
 class AlgorithmVfhFuzzy():
   KAPPA         = 1.0                                                 # 逆温度
@@ -13,7 +13,7 @@ class AlgorithmVfhFuzzy():
   ANGLES        = np.linspace(0, 2 * np.pi, BIN_NUM, endpoint=False)  # 角度
 
 
-  def __init__(self, th=1.0, k_e=1.0, k_c=1.0):
+  def __init__(self, th=3.0, k_e=1.0, k_c=1.0):
     """
     使用パラメータを初期化
     """
@@ -127,7 +127,6 @@ class AlgorithmVfhFuzzy():
     ---------------------------------------
     アルゴリズムにおけるactionの決定
     """
-    print("start policy calc")
     # stateから必要情報を取得
     self.get_state_info(state, sampled_params)
 

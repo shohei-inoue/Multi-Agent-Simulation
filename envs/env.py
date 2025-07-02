@@ -409,7 +409,7 @@ class Env(gym.Env):
 
           # 衝突判定
           if self.__map[map_y, map_x] == self.__obstacle_value:
-            print(f"Collision detected at {intermediate_coordinate} with map value {self.__map[map_y, map_x]}")
+            print(f"Agent collision detected at {intermediate_coordinate}")
             collision_flag = True
             
             # 障害物に衝突する事前位置の計算

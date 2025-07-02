@@ -67,6 +67,15 @@ class A2CAgent(BaseAgent):
         action_tensor, action_dict = self.get_action(state, episode, log_dir=csv_path)
         next_state, reward, done, turncated, infos = self.env.step(action_dict)
 
+        # 可視化更新（統合）
+        if hasattr(self.env, "render") and self.env._render_flag:
+            self.env.render(ax=self.env._render_ax)
+        if hasattr(self.algorithm, "render") and self.algorithm._render_flag:
+            self.algorithm.render(ax_params=self.algorithm._ax_params, ax_polar=self.algorithm._ax_polar)
+        
+        # フレームキャプチャ
+        self.capture_frame()
+
         # ログ構築
         log_row = {"step": step_idx}
         for key, val in state.items():
@@ -142,25 +151,16 @@ class A2CAgent(BaseAgent):
         tf.convert_to_tensor(advantages, dtype=tf.float32),
       )
 
-      # 可視化更新（統合）
-      if hasattr(self.env, "render") and self.env._render_flag:
-          self.env.render(ax=self.env._render_ax)
-      if hasattr(self.algorithm, "render") and self.algorithm._render_flag:
-          self.algorithm.render(ax_params=self.algorithm._ax_params, ax_polar=self.algorithm._ax_polar)
-      
-      # フレームキャプチャ
-      self.capture_frame()
-
       total_reward += sum(rewards)
       done = dones[-1]
       state = next_state if not done else self.env.reset()
       step_count += 1 # ステップ数更新
     
     # 終了後にログ出力
-      self.save_gif(log_dir, episode)
-      self.save_metrics(log_dir, episode, total_reward)
-      self.save_model(log_dir, episode)
-      self.log_tensorboard(log_dir, episode, total_reward)
+    self.save_gif(log_dir, episode)
+    self.save_metrics(log_dir, episode, total_reward)
+    self.save_model(log_dir, episode)
+    self.log_tensorboard(log_dir, episode, total_reward)
     
     return total_reward
 
@@ -202,7 +202,7 @@ class A2CAgent(BaseAgent):
     self.algorithm._ax_polar = ax_polar
     self.algorithm._render_flag = True
 
-    # fig.show()　# 描画off はコメントアウト
+    # fig.show() # 描画off はコメントアウト
     return fig
   
 

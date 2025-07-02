@@ -86,9 +86,6 @@ class AgentConfig:
 
     # TODO 非学習の場合の処理を追加
 
-    # === GIF 保存 ===
-    self.__env.save_gif(log_dir=log_dir, episode=episode)
-
     return total_reward
     
   
