@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 
+SCALE_MAX = 20.0
+
 class ModelActorCritic(tf.keras.Model):
   """
   Actor-Critic model with shared layers for policy and value function.
@@ -19,29 +21,27 @@ class ModelActorCritic(tf.keras.Model):
     self.shared_dense1 = tf.keras.layers.Dense(128, activation='relu')
     self.shared_dense2 = tf.keras.layers.Dense(64, activation='relu')
 
-    self.mu_output  = tf.keras.layers.Dense(3, activation='sigmoid')  # 出力 ∈ (0,1)
+    self.mu_output  = tf.keras.layers.Dense(3)
     self.log_std    = tf.Variable(initial_value=tf.zeros(3), trainable=True)
 
     self.critic_output = tf.keras.layers.Dense(1)
 
   def call(self, state):
-    """
-    Forward pass through the model.
-    Args:
-      state (tf.Tensor): Input state tensor.
-    Returns:
-      mu (tf.Tensor): Mean of the action distribution.
-      std (tf.Tensor): Standard deviation of the action distribution.
-      value (tf.Tensor): Value estimate of the state.
-    """
     x = self.shared_dense1(state)
     x = self.shared_dense2(x)
 
-    mu = self.mu_output(x)
+    raw_mu = self.mu_output(x)
+
+    # thだけ0-1、k_e, k_cは0-SCALE_MAX
+    th     = tf.nn.sigmoid(raw_mu[:, 0:1])               # shape = (batch, 1)
+    k_e_c  = tf.nn.sigmoid(raw_mu[:, 1:]) * SCALE_MAX    # shape = (batch, 2)
+
+    mu = tf.concat([th, k_e_c], axis=-1)  # shape = (batch, 3)
     std = tf.exp(self.log_std)
 
     value = self.critic_output(x)
     return mu, std, value
+
 
   @staticmethod
   def sample_action(mu, std):
@@ -56,7 +56,7 @@ class ModelActorCritic(tf.keras.Model):
     """
     epsilon = tf.random.normal(shape=mu.shape)
     action = mu + std * epsilon
-    action_clipped = tf.clip_by_value(action, 0.0, 1.0)
+    action_clipped = tf.clip_by_value(action, 0.0, SCALE_MAX)
     return action_clipped, epsilon
 
   @staticmethod

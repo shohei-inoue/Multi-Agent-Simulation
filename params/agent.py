@@ -43,7 +43,7 @@ class LearningParameter(BaseModel):
 
 class AgentParam(BaseModel):
   algorithm:                     Literal["vfh_fuzzy"] = "vfh_fuzzy"
-  maxStepsPerEpisode:            int = 10
+  maxStepsPerEpisode:            int = 30
   isLearning:                    bool = True
   learningParameter:             Optional[LearningParameter] = LearningParameter(
      type="a2c",
@@ -51,6 +51,6 @@ class AgentParam(BaseModel):
      optimizer="adam",
      gamma=0.99,
      learningLate=0.001,
-     episodeNum=10,
+     episodeNum=50,
      nStep=5,
   )

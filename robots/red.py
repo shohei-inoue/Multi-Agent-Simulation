@@ -89,14 +89,12 @@ class Red():
   
   def azimuth_adjustment(self) -> float:
     """
-    エージェントから見た自身の方向（方位角）[0, 2π)
+    自身から見た agent の方向（正しく agent に向かうベクトルの方位角）[0, 2π)
     """
     dy = self.agent_coordinate[0] - self.y
     dx = self.agent_coordinate[1] - self.x
     azimuth_rad = np.arctan2(dy, dx)
-    azimuth_rad = azimuth_rad if azimuth_rad >= 0 else (2 * np.pi + azimuth_rad)
-    return np.rad2deg(azimuth_rad)
-  
+    return azimuth_rad if azimuth_rad >= 0 else (2 * np.pi + azimuth_rad)
 
   def get_arguments(self):
     """
@@ -144,10 +142,18 @@ class Red():
     self.data.to_csv(f"{directory}/{self.id}.csv")
   
 
-  def step_motion(self) -> None:
+  def step_motion(self, agent_coordinate=None) -> None:
     """
     行動制御
     """
+    # agentの情報を更新
+    if agent_coordinate is not None:
+      self.agent_coordinate = agent_coordinate 
+
+    # distanceとazimuthを更新してからboids判定
+    self.distance = np.linalg.norm(self.coordinate - self.agent_coordinate)
+    self.azimuth = self.azimuth_adjustment()
+
     if self.collision_flag:
       prediction_coordinate = self.avoidance_behavior()
     else:
@@ -169,7 +175,7 @@ class Red():
     self.step += 1
 
     self.data = pd.concat([self.data, self.get_arguments()])
-    self.one_explore_data = pd.concat([self.one_explore_data])
+    self.one_explore_data = pd.concat([self.one_explore_data, self.get_arguments()])
 
     self._data_buffer.append([
         self.step,
@@ -210,10 +216,13 @@ class Red():
     """
     障害物回避行動
     """
-    self.direction_angle = (self.direction_angle + random.uniform(self.__avoidance_min, self.__avoidance_max))
+    self.direction_angle = self.direction_angle + random.uniform(
+      math.radians(self.__avoidance_min), 
+      math.radians(self.__avoidance_max)
+    )
     amount_of_movement = random.uniform(self.__movement_min, self.__movement_max)
-    dx = amount_of_movement * math.cos(math.radians(self.direction_angle))
-    dy = amount_of_movement * math.sin(math.radians(self.direction_angle))
+    dx = amount_of_movement * math.cos(self.direction_angle)
+    dy = amount_of_movement * math.sin(self.direction_angle)
     return np.array([self.y + dy, self.x + dx])
   
 
@@ -241,7 +250,7 @@ class Red():
         self.direction_angle = self.azimuth
     elif self.boids_flag == BoidsType.INNER:
         # agent方向の反対（180度反転）
-        self.direction_angle = (self.azimuth + 180.0) % 360.0
+        self.direction_angle = (self.azimuth + math.pi) % (2 * math.pi)
     else:
         # NONEの場合は現状維持
         self.direction_angle = self.azimuth
@@ -250,10 +259,9 @@ class Red():
         self.__boids_min,
         self.__boids_max
     )
-    angle_rad = math.radians(self.direction_angle)
 
-    dx = amount_of_movement * math.cos(angle_rad)
-    dy = amount_of_movement * math.sin(angle_rad)
+    dx = amount_of_movement * math.cos(self.direction_angle)
+    dy = amount_of_movement * math.sin(self.direction_angle)
     return np.array([self.y + dy, self.x + dx])
   
 
@@ -269,10 +277,10 @@ class Red():
     
 
     while True:
-      direction_angle = np.rad2deg(random.uniform(0.0, 2.0 * math.pi))
+      direction_angle = random.uniform(0.0, 2.0 * math.pi)
       amount_of_movement = random.uniform(self.__movement_min, self.__movement_max)
-      dx = amount_of_movement * math.cos(math.radians(direction_angle))
-      dy = amount_of_movement * math.sin(math.radians(direction_angle))
+      dx = amount_of_movement * math.cos(direction_angle)
+      dy = amount_of_movement * math.sin(direction_angle)
       prediction_position = np.array([self.y + dy, self.x + dx])
       distance = np.linalg.norm(prediction_position - self.agent_coordinate)
       estimated_probability = distribution(distance, self.__mv_mean, self.__mv_variance)
@@ -346,18 +354,23 @@ class Red():
 
   def get_collision_data(self) -> list:
     """
-    衝突情報（azimuth, distance）を抽出してリストで返す
+    直近の探索ステップ（agentが移動するまで）の衝突情報（agent → follower 向きの azimuth, distance）をリストで返す
     """
-    if hasattr(self, 'data') and not self.data.empty:
-        # NumPyで抽出
-        mask = self.data['collision_flag'].values.astype(bool)
+    if hasattr(self, 'one_explore_data') and not self.one_explore_data.empty:
+        mask = self.one_explore_data['collision_flag'].values.astype(bool)
         if not mask.any():
             return []
-        azimuths = self.data['azimuth'].values[mask]
-        distances = self.data['distance'].values[mask]
-        return list(zip(azimuths, distances))
+        
+        azimuths_f2a = self.one_explore_data['azimuth'].values[mask]
+        distances = self.one_explore_data['distance'].values[mask]
+
+        # 反転：agent → follower に変換
+        azimuths_a2f = (azimuths_f2a + np.pi) % (2 * np.pi)
+
+        return list(zip(azimuths_a2f, distances))
     else:
         return []
-    
+
+
 
 

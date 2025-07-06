@@ -1,128 +1,80 @@
-# AlgorithmVfhFuzzy: ファジィ推論に基づく方向選択アルゴリズム
+# Algorithm: VFH-Fuzzy 行動決定法
 
-## 概要
+## 1. 入力とパラメータ
 
-`AlgorithmVfhFuzzy` は、群ロボットのリーダーエージェントが移動方向を決定するためのファジィ推論ベースのアルゴリズムです。  
-フォロワーロボットの衝突情報とエージェント自身の行動履歴を組み合わせることで、安全性と探査性を両立する行動を選択します。
+- `drivability_histogram`：障害物密度に基づく走行可能性分布  
+- `exploration_improvement_histogram`：探査向上性に基づく探索欲求分布  
+- `th`: 抑制のしきい値（しきい値以下のdrivabilityは抑制）  
+- `k_e`: 探査逆方向の抑制強度  
+- `k_c`: 衝突方向の抑制強度  
+- `α`: ソフト抑制の鋭さ（固定: α=10.0）
 
-本アルゴリズムは、以下の 2 要素を統合して方向を決定します：
+## 2. 探査向上性の抑制関数
 
-- **走行可能性**（Obstacle Drivability）
-- **探査向上性**（Exploration Improvement）
+### a. 過去方向・衝突方向の抑制
+
+- 各ビン \( i \) の角度差 \( \Delta \theta_i \) に対して：
+
+\[
+\text{decay}_i = 1 - (1 - k) \cdot \exp(-s \cdot \Delta \theta_i^2)
+\]
+
+- 探査逆方向（過去方向）→ `k = k_e`, `s = 10.0`  
+- 衝突方向 → `k = k_c`, `s = 20.0`
+
+- 総スコア：
+
+\[
+E_i = 1 \cdot \prod_{\text{penalty}} \text{decay}_i
+\]
 
 ---
 
-## パラメータ
+## 3. ソフト抑制付きファジィ推論（最終スコア）
 
-| パラメータ | 意味                         | デフォルト |
-| ---------- | ---------------------------- | ---------- |
-| `th`       | 走行可能性の閾値             | 1.0        |
-| `k_e`      | 探索方向抑制係数（前回方向） | 1.0        |
-| `k_c`      | 探索方向抑制係数（衝突方向） | 1.0        |
+- 各ビン \( i \) における走行可能性 \( D_i \)、探索向上性 \( E_i \)
+
+- 抑制項：
+
+\[
+\text{suppression}_i = \frac{1}{1 + \exp(-\alpha \cdot (D_i - th))}
+\]
+
+- 最終スコア：
+
+\[
+F_i = \text{suppression}_i \cdot D_i \cdot E_i
+\]
 
 ---
 
-## アルゴリズムの構成
+## 4. 最終方向選択（重み付きサンプリング）
 
-### 1. 状態入力
+- スコアヒストグラム \( \{F_i\} \) の四分位点：
 
-```python
-state = {
-    "follower_collision_data": List[Tuple[distance, azimuth]],
-    "agent_azimuth": float,
-    "agent_collision_flag": bool,
-    "agent_coordinate_x": int,
-    "agent_coordinate_y": int
-}
-```
+\[
+Q_1 = 25\%,\quad Q_2 = 50\%,\quad Q_3 = 75\%
+\]
 
-### 2. 走行可能性ヒストグラム ( D_i )
+- ビンクラス分類：
 
-- 各フォロワーからの衝突情報 ((d_j, \theta_j)) に基づき、ヒストグラムビンへ加算：
+| ビン | 条件                          | 重み |
+|------|-------------------------------|------|
+| Very Good | \( F_i \ge Q_3 \)           | 0.6  |
+| Good      | \( Q_2 \le F_i < Q_3 \)     | 0.25 |
+| Okay      | \( Q_1 \le F_i < Q_2 \)     | 0.15 |
 
-```
-D_i = \sum_{j} \frac{1}{d_j + \varepsilon} \cdot \delta\left(i = \left\lfloor \frac{\theta_j \cdot 180 / \pi}{\Delta \theta} \right\rfloor \right)
-```
+- クラスごとに等確率で選択し、最終方向 \( \theta \) を決定：
 
-- 距離が遠い衝突は影響が小さく、近い衝突ほどスコアに大きく影響
+\[
+\theta = \frac{2\pi \cdot \text{selected\_bin}}{\text{BIN\_NUM}}
+\]
 
-### 3. 探査向上性ヒストグラム ( E_i )
+---
 
-- 前回移動方向の抑制
+## 5. 出力
 
-```
-E_i \leftarrow E_i \cdot \left(1 - (1 - k_e) \cdot \exp\left(-\alpha (\Delta \theta_{i,\text{prev}})^2\right)\right)
-```
+- 行動：  
+  - `theta`：移動方向（ラジアン）  
+  - `mode`：現在は固定で 0
 
-- 衝突方向の抑制
-
-```
-E_i \leftarrow E_i \cdot \left(1 - (1 - k_c) \cdot \exp\left(-\beta (\Delta \theta_{i,\text{col}})^2\right)\right)
-```
-
-    •	( \alpha = 10.0, \beta = 20.0 )
-    •	( \Delta \theta ) は角度差（0〜π）
-
-- 正規化
-
-```
-E_i \leftarrow \frac{E_i + \varepsilon}{\sum_j (E_j + \varepsilon)}
-```
-
-### 4. 統合スコアヒストグラム ( R_i )
-
-ファジィ推論として積集合を計算：
-
-```
-2R_i =
-\begin{cases}
-D_i \cdot E_i & \text{if } D_i \geq \text{th} \
-0 & \text{otherwise}
-\end{cases}
-```
-
-```
-R_i \leftarrow \frac{R_i + \varepsilon}{\sum_j (R_j + \varepsilon)}
-```
-
-### 5. 重み付き確率サンプリングによる方向選択
-
-スコアヒストグラム `R_i` を四分位点でカテゴリ分けし、以下の確率でサンプリング：
-
-| スコアカテゴリ         | 条件            | 選択確率 |
-| ---------------------- | --------------- | -------- |
-| 非常に良い (Q3〜)      | `R_i ≥ Q3`      | 60%      |
-| 良い (Q2〜Q3)          | `Q2 ≤ R_i < Q3` | 30%      |
-| あまり良くない(Q1〜Q2) | `Q1 ≤ R_i < Q2` | 10%      |
-
-最終的な角度は以下で決定：
-
-```
-θ = 2π × selected_bin / BIN_NUM
-```
-
-### 6. 出力形式
-
-```python
-action = {
-    "theta": float,  # 選択された移動方向（ラジアン）
-    "mode": int      # 行動モード（今後の拡張用）
-}
-
-action_tensor: tf.Tensor  # 学習対象パラメータ（th, k_e, k_c）
-```
-
-### 7. features
-
-#### 特徴と利点
-
-- `sampled_params` を渡すことで、強化学習によるパラメータ最適化が可能
-- **安全性と探索性の両立**
-  - 衝突回避と新規領域探索のバランスを制御可能
-- **環境依存性の低さ**
-  - `explored_map` に依存しない設計であり、柔軟な状態定義が可能
-
-#### 展望
-- `mode` による分岐行動（停止、旋回など）の導入
-- `state` に探索済み確率やコストマップを含めて探索性強化
-- `follower_collision_data` の時間履歴を用いた動的予測

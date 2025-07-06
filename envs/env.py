@@ -119,8 +119,8 @@ class Env(gym.Env):
     ) for index in range(self.__robot_num)]
 
     # ----- set initial state -----
-    MAX_COLLISION_NUM = 100
-    initial_fcd = [np.array([0.0, 0.0], dtype=np.float32)] * MAX_COLLISION_NUM
+    self.MAX_COLLISION_NUM = 100
+    initial_fcd = [np.array([0.0, 0.0], dtype=np.float32)] * self.MAX_COLLISION_NUM
     self.__initial_state = create_initial_state(
       self.__agent_initial_coordinate[1],
       self.__agent_initial_coordinate[0],
@@ -129,6 +129,8 @@ class Env(gym.Env):
       agent_step_count=self.agent_step,
       follower_collision_data=initial_fcd
     )
+
+    self.follower_collision_points = [] # 描画用のfollower衝突リスト
 
     self.state = self.__initial_state
   
@@ -182,6 +184,8 @@ class Env(gym.Env):
     # ----- reset state -----
     self.scorer = Score()
     self.state = copy.deepcopy(self.__initial_state)
+
+    self.follower_collision_points = [] # 描画用のfollower衝突リスト
 
     return self.state
   
@@ -276,6 +280,39 @@ class Env(gym.Env):
       ax.set_xlabel('X')
       ax.set_ylabel('Y')
       ax.grid(False)
+
+      # === 探索範囲円とフォロワ・衝突位置の可視化 ===
+
+      # エージェント中心と探索範囲
+      center_x = self.agent_coordinate[1]
+      center_y = self.agent_coordinate[0]
+      explore_radius = self.__boundary_outer
+
+      # 探索円を描画（点線で見やすく）
+      explore_circle = Circle(
+          (center_x, center_y),
+          explore_radius,
+          color='black',
+          fill=False,
+          linestyle='dashed',
+          linewidth=1.5,
+          alpha=0.6,
+          zorder=2
+      )
+      ax.add_patch(explore_circle)
+
+
+      # === フォロワによる衝突点の描画 ===
+      for cx, cy in self.follower_collision_points:
+          ax.plot(cx, cy, 'rx', markersize=6, zorder=5)
+
+
+    #   # === フォロワの現在位置 ===
+    #   for i, follower in enumerate(self.follower_robots):
+    #       fx = follower.data['x'].iloc[-1]
+    #       fy = follower.data['y'].iloc[-1]
+    # ax.plot(fx, fy, 'ro', markersize=4, label="Follower" if i == 0 else "", zorder=3)
+
   
 
   def step(self, action):
@@ -285,6 +322,8 @@ class Env(gym.Env):
     # TODO modeの動作導入
 
     # 移動先の距離計算
+    # エージェントのステップ処理の先頭または中で
+    self.state['agent_azimuth'] = action['theta']  
     dx = self.__boundary_outer * math.cos(action['theta'])
     dy = self.__boundary_outer * math.sin(action['theta'])
 
@@ -310,8 +349,28 @@ class Env(gym.Env):
     for _ in range(self.__offset.one_explore_step):
       for index in range(len(self.follower_robots)):
         previous_coordinate = self.follower_robots[index].coordinate
-        self.follower_robots[index].step_motion()
+        self.follower_robots[index].step_motion(agent_coordinate=self.agent_coordinate)
         self.update_exploration_map(previous_coordinate, self.follower_robots[index].coordinate)
+
+         # === 衝突フラグがTrueなら座標を追加 ===
+        if self.follower_robots[index].collision_flag:
+            cx = self.follower_robots[index].coordinate[1]
+            cy = self.follower_robots[index].coordinate[0]
+            self.follower_collision_points.append((cx, cy))
+
+            # 検証: get_collision_data() の出力と一致するか
+            agent_y, agent_x = self.agent_coordinate
+            dy = cy - agent_y
+            dx = cx - agent_x
+            distance = np.sqrt(dx**2 + dy**2)
+            azimuth = np.arctan2(dy, dx)
+
+            debug_data = self.follower_robots[index].get_collision_data()
+            if debug_data:
+                a, d = debug_data[-1]  # 最新の1件
+                est_x = agent_x + d * np.cos(a)
+                est_y = agent_y + d * np.sin(a)
+                # print(f"Follower {index} collision: actual=({cx:.2f},{cy:.2f}), est=({est_x:.2f},{est_y:.2f})")
       
       # レンダリング
       if hasattr(self, "_render_flag") and self._render_flag:
@@ -320,32 +379,29 @@ class Env(gym.Env):
         self._render_ax.figure.canvas.flush_events()
         if hasattr(self, "capture_frame"):
             self.capture_frame()
-
-      MAX_COLLISION_NUM = 100
-
-      # フォロワから衝突データ収集
-      follower_collision_data = []
-      for follower in self.follower_robots:
-          follower_collision_data.extend(follower.get_collision_data())  # List[Tuple[float, float]] # distance, azimuth
-          self.scorer.follower_collision_count += len(follower_collision_data)
-
-      # MAX_COLLISION_NUM 個だけ使う（足りない分はゼロ埋め）
-      MAX_COLLISION_NUM = 100
-      padded_list = follower_collision_data[:MAX_COLLISION_NUM]
-      padding_needed = MAX_COLLISION_NUM - len(padded_list)
-
-      fcd_ndarray = [np.array(pair, dtype=np.float32) for pair in padded_list]
-      fcd_ndarray.extend([np.array([0.0, 0.0], dtype=np.float32)] * padding_needed)
-
-      self.state['follower_collision_data'] = fcd_ndarray
-
+      
       # 探査率計算
       previous_ratio = self.scorer.exploration_rate[-1] if self.scorer.exploration_rate else 0.0
       self.exploration_ratio = self.scorer.calc_exploration_rate(
         explored_area=self.explored_area,
         total_area=self.total_area
       )
-      print(f"exploration ratio | {self.exploration_ratio}")
+      print(f"exploration ratio | {self.exploration_ratio} | ( {self.explored_area} / {self.total_area})")
+
+    # フォロワから衝突データ収集
+    follower_collision_data = []
+    for follower in self.follower_robots:
+        follower_collision_data.extend(follower.get_collision_data())  # List[Tuple[float, float]] # distance, azimuth
+        self.scorer.follower_collision_count += len(follower_collision_data)
+
+    # MAX_COLLISION_NUM 個だけ使う（足りない分はゼロ埋め）
+    padded_list = follower_collision_data[:self.MAX_COLLISION_NUM]
+    padding_needed = self.MAX_COLLISION_NUM - len(padded_list)
+
+    fcd_ndarray = [np.array(pair, dtype=np.float32) for pair in padded_list]
+    fcd_ndarray.extend([np.array([0.0, 0.0], dtype=np.float32)] * padding_needed)
+
+    self.state['follower_collision_data'] = fcd_ndarray
     
     # ----- calculate reward -----
     # デフォルト報酬

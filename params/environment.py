@@ -6,7 +6,7 @@ class MapParam(BaseModel):
     seed   : int = 42
 
 class ObstacleParam(BaseModel):
-    probability : float = 0.01
+    probability : float = 0.005
     maxSize     : float = 10
     value       : int   = 1000
 

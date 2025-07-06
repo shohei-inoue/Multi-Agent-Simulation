@@ -4,6 +4,7 @@ import tensorflow as tf
 import os
 import csv
 import matplotlib.pyplot as plt
+from scipy.special import i0
 
 
 class AlgorithmVfhFuzzy():
@@ -13,7 +14,7 @@ class AlgorithmVfhFuzzy():
   ANGLES        = np.linspace(0, 2 * np.pi, BIN_NUM, endpoint=False)  # 角度
 
 
-  def __init__(self, th=3.0, k_e=1.0, k_c=1.0):
+  def __init__(self, th=1.0, k_e=5.0, k_c=5.0):
     """
     使用パラメータを初期化
     """
@@ -48,7 +49,6 @@ class AlgorithmVfhFuzzy():
     """
     angles = self.ANGLES
 
-    # サブプロットが渡されていなければ新規作成（単体でのdebug用）
     if ax_polar is None or ax_params is None:
         fig = plt.figure(figsize=(12, 6))
         gs = fig.add_gridspec(2, 3)
@@ -70,7 +70,7 @@ class AlgorithmVfhFuzzy():
             ax.set_ylabel("Value")
             ax.set_xlim(left=0)
 
-    # --- 極座標ヒストグラム（3種類）---
+    # --- 極座標ヒストグラム ---
     histograms = [
         self.drivability_histogram,
         self.exploration_improvement_histogram,
@@ -79,34 +79,50 @@ class AlgorithmVfhFuzzy():
     titles = ["Drivability", "Exploration", "Result"]
 
     for i, ax in enumerate(ax_polar):
-      if i >= len(histograms): continue
-      ax.clear()
-      ax.set_title(titles[i])
+        if i >= len(histograms):
+            continue
 
-      colors = ['tab:blue'] * self.BIN_NUM
-      if i == 2 and hasattr(self, "selected_bin"):
-          colors[self.selected_bin] = 'tab:red'
+        ax.clear()
+        ax.set_title(titles[i])
+        values = histograms[i]
 
-      # ヒストグラム表示
-      ax.bar(angles, histograms[i], width=np.deg2rad(self.BIN_SIZE_DEG), alpha=0.7, color=colors)
+        # --- カラー設定 ---
+        if i == 2:
+            # Resultヒストグラム：四分位数で色分け
+            q1, q2, q3 = np.quantile(values, [0.25, 0.5, 0.75])
+            colors = []
+            for v in values:
+                if v >= q3:
+                    colors.append('tab:red')     # very good
+                elif v >= q2:
+                    colors.append('tab:orange')  # good
+                elif v >= q1:
+                    colors.append('tab:green')   # okay
+                else:
+                    colors.append('tab:gray')    # bad
+            if hasattr(self, "selected_bin"):
+                colors[self.selected_bin] = 'gold'  # selected
+        else:
+            colors = ['tab:blue'] * self.BIN_NUM
 
-      # 衝突点（drivabilityのみ）
-      if i == 0:
-          for d, a in self.follower_collision_data:
-              ax.plot(a, d, 'ro')  # or ax.scatter(a, d, color='red', s=20)
+        # --- ヒストグラムバー描画 ---
+        ax.bar(angles, values, width=np.deg2rad(self.BIN_SIZE_DEG), alpha=0.7, color=colors)
 
-          # y軸スケーリング調整
-          collision_max = max([d for d, _ in self.follower_collision_data], default=1.0)
-          ax.set_ylim(0, max(histograms[i].max(), collision_max) * 1.2)
-      
-      # 選択方向の矢印（Resultのみに描画）
-      if i == 2 and hasattr(self, "theta") and self.theta is not None:
-          r_max = max(histograms[i]) * 1.1
-          ax.annotate("",
-              xy=(self.theta, r_max),
-              xytext=(0, 0),
-              arrowprops=dict(facecolor='red', edgecolor='red', width=2, headwidth=8),
-          )
+        # --- KDE線の追加（drivabilityのみ）---
+        if i == 0:
+            extended_angles = np.linspace(0, 2 * np.pi, 360)
+            kde_values = np.interp(extended_angles, angles, values, period=2 * np.pi)
+            ax.plot(extended_angles, kde_values, color='black', linewidth=2, label="KDE-like")
+            ax.legend(loc="upper right")
+
+        # --- 選択方向の矢印（Resultのみ）---
+        if i == 2 and hasattr(self, "theta") and self.theta is not None:
+            r_max = max(values) * 1.1
+            ax.annotate("",
+                        xy=(self.theta, r_max),
+                        xytext=(0, 0),
+                        arrowprops=dict(facecolor='red', edgecolor='red', width=2, headwidth=8))
+
 
 
   def policy(self, state, sampled_params, episode, log_dir: str = None):
@@ -240,22 +256,55 @@ class AlgorithmVfhFuzzy():
     
 
 
+  # def get_obstacle_density_histogram(self):
+  #   histogram = np.zeros(self.BIN_NUM, dtype=np.float32)
+
+  #   for azimuth, distance in self.follower_collision_data:
+  #       if distance < 1e-6:
+  #           continue  # 無効データ（0埋めなど）はスキップ
+
+  #       azimuth_deg = azimuth % 360.0
+  #       bin_index = int(azimuth_deg) // self.BIN_SIZE_DEG
+  #       histogram[bin_index] += 1.0 / (distance + 1e-3)
+
+  #   histogram += 1e-6  # 0除算対策
+  #   histogram /= np.sum(histogram)
+
+  #   return histogram
+
+
   def get_obstacle_density_histogram(self):
     """
-    vfhにより走行可能な方向を算出
-    - 各フォロワの衝突情報を全取得
-    - ヒストグラム形式に分割した領域ごとに衝突情報を振り分け
-    - thを上回る領域を選択
+    KDE + 距離重みに基づいて、滑らかな「**走行可能性**」ヒストグラムを生成。
+    衝突が多い方向は「危険」として低スコアになるように**反転処理**を含む。
     """
-    # ヒストグラムを作成
-    histogram = np.zeros(self.BIN_NUM, dtype=np.float32)
+    risk_histogram = np.zeros(self.BIN_NUM, dtype=np.float32)
+
+    sigma_angle = np.deg2rad(20)   # カーネル角度幅（20度 ≒ 1ビン）
+    sigma_distance = 5.0           # 距離スケール（大きいほど遠くでも重視）
 
     for azimuth, distance in self.follower_collision_data:
-      azimuth_deg = azimuth % 360.0
-      bin_index = int(azimuth_deg) // self.BIN_SIZE_DEG
-      histogram[bin_index] += 1.0 / (distance + 1e-3) # 距離が遠いほど影響は小さく
-    
-    return histogram
+        if distance < 1e-6:
+            continue  # 無効データは無視
+
+        # 距離が近いほど危険 → 距離が遠いほど安全
+        dist_weight = np.exp(-distance / sigma_distance)
+
+        for i, angle in enumerate(self.ANGLES):
+            angle_diff = min(abs(angle - azimuth), 2 * np.pi - abs(angle - azimuth))
+            angle_weight = np.exp(- (angle_diff ** 2) / (2 * sigma_angle ** 2))
+            risk_histogram[i] += angle_weight * dist_weight
+
+    # 正規化（危険度の合計が1）
+    risk_histogram += 1e-6
+    risk_histogram /= np.sum(risk_histogram)
+
+    # === 【反転処理】 ===
+    drivability = 1.0 - risk_histogram
+    drivability += 1e-6  # 0除け
+    drivability /= np.sum(drivability)  # 正規化（確率分布）
+
+    return drivability
 
 
   def get_exploration_improvement_histogram(self) -> np.ndarray:
@@ -278,19 +327,49 @@ class AlgorithmVfhFuzzy():
         angle_diff = min(abs(theta - base_azimuth), 2 * math.pi - abs(theta - base_azimuth))
         decay = 1 - (1 - k) * math.exp(-sharpness * (angle_diff ** 2))
         histogram[i] *= decay
+    
+
+    def apply_direction_weight_von(base_azimuth: float, kappa: float):
+      """
+      base_azimuth方向にフォン・ミーゼス分布に基づく抑制を適用
+      - kappa: 分布の集中度（大きいほど中心への抑制が強い）
+      """
+      # vm_pdf_max は分布の最大値で、中心方向の抑制度合いに使う
+      vm_pdf_max = np.exp(kappa) / (2 * np.pi * i0(kappa))
+
+      for i in range(self.BIN_NUM):
+          theta = 2 * math.pi * i / self.BIN_NUM
+          angle_diff = np.arctan2(math.sin(theta - base_azimuth), math.cos(theta - base_azimuth))
+          vm_pdf = np.exp(kappa * np.cos(angle_diff)) / (2 * math.pi * i0(kappa))
+
+          # 抑制 → 分布値が大きいほど強く減衰
+          decay = 1.0 - vm_pdf / vm_pdf_max  # 0～1の範囲
+          histogram[i] *= (1.0 - decay)  # もしくは histogram[i] *= (1.0 - alpha * decay)
 
     # ヒストグラムを初期化
     histogram = np.ones(self.BIN_NUM, dtype=np.float32)
 
     # 前回探査方向の影響
-    if self.agent_azimuth is not None:
-      reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
-      apply_direction_weight(reverse_azimuth, self.k_e, sharpness=10.0)
+    # if self.agent_azimuth is not None:
+    #   reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
+    #   # apply_direction_weight(reverse_azimuth, self.k_e, sharpness=10.0)
+    #   apply_direction_weight_von(reverse_azimuth, self.k_e)
     
-    # 衝突方向の影響
-    if self.agent_collision_flag: # 衝突があった場合
-        collision_azimuth = self.agent_azimuth
-        apply_direction_weight(collision_azimuth, self.k_c, sharpness=20.0)
+    # # 衝突方向の影響
+    # if self.agent_collision_flag: # 衝突があった場合
+    #     collision_azimuth = self.agent_azimuth
+    #     # apply_direction_weight(collision_azimuth, self.k_c, sharpness=20.0)
+    #     apply_direction_weight_von(collision_azimuth, self.k_e)]
+
+    # 探査済み方向（前回進んだ方向）を抑制　→ 正しい（check済み）
+    if self.agent_azimuth is not None:
+        apply_direction_weight_von(self.agent_azimuth, self.k_e)
+
+    # # 衝突方向を抑制
+    if self.agent_collision_flag:
+        reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
+        apply_direction_weight_von(reverse_azimuth, self.k_c)
+
     
     # ----- 周辺環境をstateで送ることになった場合に使用 ----
     # # 未探査領域に向けてスコアを上げる 
@@ -315,48 +394,37 @@ class AlgorithmVfhFuzzy():
   
 
   def get_final_result_histogram(self, drivability, exploration_improvement) -> np.ndarray:
-    """
-    ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す。
-    - drivability_histogram: 走行可能性ヒストグラム
-    - exploration_improvement_histogram: 探査向上性ヒストグラム
-    - th: 走行可能性の閾値
-    Returns:
-        fused_score: 各binの最終スコアヒストグラム (np.ndarray)
-    """
-    # 走行可能性と探査向上性のヒストグラムが同じ長さであることを確認
-    assert len(drivability) == len(exploration_improvement)
+      """
+      ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す。
+      - drivability_histogram: 走行可能性ヒストグラム
+      - exploration_improvement_histogram: 探査向上性ヒストグラム
+      Returns:
+          fused_score: 各binの最終スコアヒストグラム (np.ndarray)
+      """
+      assert len(drivability) == len(exploration_improvement)
 
-    # ファジィ推論の結果を格納する配列
-    # 走行可能性が閾値以下の方向は無視するため、初期化
-    fused_score = np.zeros(self.BIN_NUM, dtype=np.float32)
+      fused_score = np.zeros(self.BIN_NUM, dtype=np.float32)
 
-    # 各方向の走行可能性と探査向上性を組み合わせる
-    for bin in range(self.BIN_NUM):
-        drive_val   = drivability[bin]
-        explore_val = exploration_improvement[bin]
+      alpha = 10.0  # 抑制の鋭さ（高いほどしきい値で急激に抑制）
 
-        # 閾値以下の方向は無視（または小さな値に抑制）
-        if drive_val < self.th:
-            continue
+      for bin in range(self.BIN_NUM):
+          drive_val = drivability[bin]
+          explore_val = exploration_improvement[bin]
 
-        # 積集合的なファジィ推論：drive × explore
-        fused_score[bin] = drive_val * explore_val
+          # ソフト抑制係数（sigmoid的スケーリング）
+          suppression = 1 / (1 + np.exp(-alpha * (drive_val - self.th)))
 
-    # 正規化（確率解釈や描画用に使う場合）
-    fused_score += 1e-6  # ゼロ除け
-    fused_score /= np.sum(fused_score)
+          # 抑制付きのファジィ積推論
+          fused_score[bin] = suppression * drive_val * explore_val
 
-    return fused_score
+      fused_score += 1e-6  # ゼロ除け
+      fused_score /= np.sum(fused_score)
+
+      return fused_score
+
   
   
   def select_final_direction_by_weighted_sampling(self, result: np.ndarray) -> float:
-    """
-    ファジィ推論ヒストグラムのスコアに応じて方向選択を行う。
-    ・Q3以上: 非常に良い
-    ・Q2〜Q3: 良い
-    ・Q1〜Q2: あまり良くない
-    （Q1未満やスコア0は除外）
-    """
     q1, q2, q3 = np.quantile(result, [0.25, 0.5, 0.75])
 
     bins_very_good = [i for i, v in enumerate(result) if v >= q3 and v > 0.0]
@@ -366,29 +434,34 @@ class AlgorithmVfhFuzzy():
     bins = bins_very_good + bins_good + bins_okay
 
     if not bins:
-        print("return fallback")
-        return self.agent_azimuth or 0.0
+        if self.agent_azimuth is not None:
+            fallback_theta = (self.agent_azimuth + np.pi) % (2 * np.pi)
+            print(f"[Fallback] No valid bin found. Returning reverse direction: {np.rad2deg(fallback_theta)} deg")
+            return fallback_theta
+        else:
+            fallback_theta = np.random.uniform(0, 2 * np.pi)
+            print(f"[Fallback] No azimuth available. Returning random direction: {np.rad2deg(fallback_theta)} deg")
+            return fallback_theta
 
-    # 安全に重みを構築（カテゴリが空ならその重み0に）
+    # 重み付け（存在するカテゴリだけ使う）
+    score_q1 = 0.6 if bins_very_good else 0.0
+    score_q2 = 0.25 if bins_good else 0.0
+    score_q3 = 0.15 if bins_okay else 0.0
+    total_score = score_q1 + score_q2 + score_q3
+
+    # 正規化
+    score_q1 /= total_score if total_score > 0 else 1.0
+    score_q2 /= total_score if total_score > 0 else 1.0
+    score_q3 /= total_score if total_score > 0 else 1.0
+
+    # 重みに従って構築（既に正規化済みなので再正規化不要）
     weights = []
-    total_weight = 0
-
-    score_q1 = 0.7
-    score_q2 = 0.25
-    score_q3 = 1.0 - (score_q1 + score_q2)
-
     if bins_very_good:
         weights += [score_q1 / len(bins_very_good)] * len(bins_very_good)
-        total_weight += score_q1
     if bins_good:
         weights += [score_q2 / len(bins_good)] * len(bins_good)
-        total_weight += score_q2
     if bins_okay:
         weights += [score_q3 / len(bins_okay)] * len(bins_okay)
-        total_weight += score_q3
-
-    # 正規化（合計が1.0になるように）
-    weights = [w / total_weight for w in weights]
 
     selected_bin = np.random.choice(bins, p=weights)
     selected_angle = 2 * np.pi * selected_bin / self.BIN_NUM
