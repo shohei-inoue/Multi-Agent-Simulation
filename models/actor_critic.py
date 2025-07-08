@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 
-SCALE_MAX = 20.0
+SCALE_MAX = 50.0
 
 class ModelActorCritic(tf.keras.Model):
   """
@@ -9,6 +9,8 @@ class ModelActorCritic(tf.keras.Model):
   This model outputs a probability distribution for actions and a value estimate.
   The actions are sampled from a Gaussian distribution parameterized by the output of the model.
   The model also computes the log probabilities of the actions for policy gradient updates.
+  
+  群ロボット探査最適化のための拡張版
   """
   def __init__(self, input_dim):
     """
@@ -32,7 +34,10 @@ class ModelActorCritic(tf.keras.Model):
 
     raw_mu = self.mu_output(x)
 
-    # thだけ0-1、k_e, k_cは0-SCALE_MAX
+    # パラメータ範囲の最適化
+    # th: 0-1（走行可能性閾値）
+    # k_e: 0-SCALE_MAX（探査向上性重み）
+    # k_c: 0-SCALE_MAX（衝突回避重み）
     th     = tf.nn.sigmoid(raw_mu[:, 0:1])               # shape = (batch, 1)
     k_e_c  = tf.nn.sigmoid(raw_mu[:, 1:]) * SCALE_MAX    # shape = (batch, 2)
 
@@ -51,7 +56,7 @@ class ModelActorCritic(tf.keras.Model):
       mu (tf.Tensor): Mean of the action distribution.
       std (tf.Tensor): Standard deviation of the action distribution.
     Returns:
-      action (tf.Tensor): Sampled action, clipped to [0, 1].
+      action (tf.Tensor): Sampled action, clipped to [0, SCALE_MAX].
       epsilon (tf.Tensor): Random noise used for sampling.
     """
     epsilon = tf.random.normal(shape=mu.shape)
@@ -97,8 +102,9 @@ class ModelActorCritic(tf.keras.Model):
     actor_loss = -tf.reduce_mean(log_probs * advantages)
     critic_loss = tf.reduce_mean(tf.square(returns - tf.squeeze(values, axis=-1)))
 
+    # 探査最適化のためのエントロピーボーナス調整
     entropy = tf.reduce_mean(0.5 * tf.math.log(2.0 * np.pi * tf.square(std)) + 0.5)
-    entropy_bonus = 0.01 * entropy
+    entropy_bonus = 0.02 * entropy  # エントロピーボーナスを増加（0.01 → 0.02）
 
     total_loss = actor_loss + 0.5 * critic_loss - entropy_bonus
     return total_loss, actor_loss, critic_loss

@@ -424,12 +424,14 @@ class Env(gym.Env):
     # デフォルト報酬
     reward = self.__reward_dict.get('default', -1)
 
-    # 探査率が上昇した時
-    if self.exploration_ratio > previous_ratio:
-      reward += self.__reward_dict.get('exploration_gain', 0.0)
-    else:
-    # 上がらなかった場合
-      reward += self.__reward_dict.get('revisit_penalty', 0.0)
+    # 探査率の上昇具合に応じた報酬計算
+    from .reward import calculate_exploration_reward
+    exploration_reward = calculate_exploration_reward(
+        self.exploration_ratio, 
+        previous_ratio, 
+        self.__reward_dict
+    )
+    reward += exploration_reward
 
     # リーダーが障害物に衝突した場合
     if self.collision_flag:
