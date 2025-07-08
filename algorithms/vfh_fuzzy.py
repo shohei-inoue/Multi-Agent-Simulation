@@ -331,20 +331,19 @@ class AlgorithmVfhFuzzy():
 
     def apply_direction_weight_von(base_azimuth: float, kappa: float):
       """
-      base_azimuth方向にフォン・ミーゼス分布に基づく抑制を適用
-      - kappa: 分布の集中度（大きいほど中心への抑制が強い）
+      base_azimuth方向を中心にフォン・ミーゼス分布で【抑制】をかける
+      - kappa: フォン・ミーゼス分布の集中度（大きいほど鋭い抑制）
       """
-      # vm_pdf_max は分布の最大値で、中心方向の抑制度合いに使う
-      vm_pdf_max = np.exp(kappa) / (2 * np.pi * i0(kappa))
+      vm_pdf_max = np.exp(kappa) / (2 * np.pi * i0(kappa))  # 中心方向の最大値
 
       for i in range(self.BIN_NUM):
           theta = 2 * math.pi * i / self.BIN_NUM
           angle_diff = np.arctan2(math.sin(theta - base_azimuth), math.cos(theta - base_azimuth))
-          vm_pdf = np.exp(kappa * np.cos(angle_diff)) / (2 * math.pi * i0(kappa))
-
-          # 抑制 → 分布値が大きいほど強く減衰
-          decay = 1.0 - vm_pdf / vm_pdf_max  # 0～1の範囲
-          histogram[i] *= (1.0 - decay)  # もしくは histogram[i] *= (1.0 - alpha * decay)
+          vm_pdf = np.exp(kappa * np.cos(angle_diff)) / (2 * np.pi * i0(kappa))
+          
+          # 中心方向に向かうほど値が小さくなるように：1.0 - 正規化された vm_pdf
+          suppress_factor = 1.0 - (vm_pdf / vm_pdf_max)  # ← 中心方向≒0、周囲≒1
+          histogram[i] *= suppress_factor  # 凹ませる（中心方向を弱くする）
 
     # ヒストグラムを初期化
     histogram = np.ones(self.BIN_NUM, dtype=np.float32)
@@ -363,12 +362,13 @@ class AlgorithmVfhFuzzy():
 
     # 探査済み方向（前回進んだ方向）を抑制　→ 正しい（check済み）
     if self.agent_azimuth is not None:
-        apply_direction_weight_von(self.agent_azimuth, self.k_e)
+        reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
+        apply_direction_weight_von(reverse_azimuth, self.k_e)
 
     # # 衝突方向を抑制
     if self.agent_collision_flag:
         reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
-        apply_direction_weight_von(reverse_azimuth, self.k_c)
+        apply_direction_weight_von(self.agent_azimuth, self.k_c)
 
     
     # ----- 周辺環境をstateで送ることになった場合に使用 ----

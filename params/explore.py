@@ -18,4 +18,4 @@ class ExploreParam(BaseModel):
     coordinate : InitialCoordinate = InitialCoordinate()
     robotNum   : int               = 10
     finishRate : float             = 0.8
-    finishStep : int               = 20
+    finishStep : int               = 40
