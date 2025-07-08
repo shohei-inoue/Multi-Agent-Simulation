@@ -7,12 +7,12 @@ from params.robot_logging import RobotLoggingConfig
 class Score:
   # TODO スコアの取得がが未実装
   def __init__(self, robot_logging_config: RobotLoggingConfig | None = None):
-    self.goal_reaching_step = None # 目標の探査率に到達したステップ
+    self.goal_reaching_step: int | None = None # 目標の探査率に到達したステップ
     self.revisit_ratio = 0.0 # 同じセルへの再訪問率
     self.revisit_count = 0 # 再訪問回数
     self.follower_collision_count = 0 # フォロワの合計衝突回数
     self.agent_collision_count = 0 # エージェントの合計衝突回数
-    self.total_distance_traveled = 0 # 合計走行距離
+    self.total_distance_traveled: float = 0.0 # 合計走行距離
 
     self.exploration_rate = [] # 探査率格納用リスト
     

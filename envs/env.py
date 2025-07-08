@@ -12,7 +12,7 @@ from envs.env_map import generate_explored_map, generate_rect_obstacle_map
 from .action_space import create_action_space
 from .observation_space import create_observation_space, create_initial_state
 from .reward import create_reward
-from robots.red import Red
+from robots.red import Red, BoidsType
 from params.simulation import Param
 from params.robot_logging import RobotLoggingConfig
 from scores.score import Score
@@ -116,7 +116,7 @@ class Env(gym.Env):
       amount_of_movement    = self.__offset.amount_of_movement,
       direction_angle       = self.__offset.direction_angle,
       collision_flag        = self.__offset.collision_flag,
-      boids_flag            = self.__offset.boids_flag,
+      boids_flag            = BoidsType(self.__offset.boids_flag.value),
       estimated_probability = self.__offset.estimated_probability
     ) for index in range(self.__robot_num)]
 
@@ -175,7 +175,7 @@ class Env(gym.Env):
       amount_of_movement    = self.__offset.amount_of_movement,
       direction_angle       = self.__offset.direction_angle,
       collision_flag        = self.__offset.collision_flag,
-      boids_flag            = self.__offset.boids_flag,
+      boids_flag            = BoidsType(self.__offset.boids_flag.value),
       estimated_probability = self.__offset.estimated_probability
     ) for index in range(self.__robot_num)]
 
@@ -213,7 +213,7 @@ class Env(gym.Env):
           self.__map,
           cmap='gray_r',
           origin='lower',
-          extent=[0, self.__map_width, 0, self.__map_height],
+          extent=(0, self.__map_width, 0, self.__map_height),
       )
 
       # 探査済み領域
@@ -227,7 +227,7 @@ class Env(gym.Env):
           alpha=0.5,
           norm=norm,
           origin='lower',
-          extent=[0, self.__map_width, 0, self.__map_height],
+          extent=(0, self.__map_width, 0, self.__map_height),
       )
 
       # 探査中心
@@ -452,7 +452,7 @@ class Env(gym.Env):
       reward += self.__reward_dict.get('none_finish_penalty', 0.0)
     
 
-    distance = np.linalg.norm(self.agent_coordinate - self.previous_agent_coordinate)
+    distance = float(np.linalg.norm(self.agent_coordinate - self.previous_agent_coordinate))
     self.scorer.total_distance_traveled += distance
     
     # ステップごとのスコアデータを記録
@@ -517,7 +517,7 @@ class Env(gym.Env):
     保存したフレームをGIFとして保存する
 
     Parameters:
-    - log_dir: ログディレクトリ（gifs/ 以下に保存される）
+    - log_dir: ログディレクトリ (gifs/ 以下に保存される）
     - episode: エピソード番号
     """
     gif_dir = os.path.join(log_dir, "gifs")
@@ -527,7 +527,6 @@ class Env(gym.Env):
     imageio.mimsave(
         os.path.join(gif_dir, gif_name),  # 保存パス
         self.env_frames,                  # フレームリスト
-        format='GIF',
         duration=0.1,
     )
 

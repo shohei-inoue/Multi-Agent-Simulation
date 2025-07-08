@@ -1,9 +1,10 @@
 import tensorflow as tf
 import numpy as np
+import keras
 
 SCALE_MAX = 50.0
 
-class ModelActorCritic(tf.keras.Model):
+class ModelActorCritic(keras.Model):
   """
   Actor-Critic model with shared layers for policy and value function.
   This model outputs a probability distribution for actions and a value estimate.
@@ -18,15 +19,14 @@ class ModelActorCritic(tf.keras.Model):
     Args:
       input_dim (int): The dimension of the input state.
     """
-    super(ModelActorCritic, self).__init__()
     super().__init__()
-    self.shared_dense1 = tf.keras.layers.Dense(128, activation='relu')
-    self.shared_dense2 = tf.keras.layers.Dense(64, activation='relu')
+    self.shared_dense1 = keras.layers.Dense(128, activation='relu')
+    self.shared_dense2 = keras.layers.Dense(64, activation='relu')
 
-    self.mu_output  = tf.keras.layers.Dense(3)
+    self.mu_output  = keras.layers.Dense(3)
     self.log_std    = tf.Variable(initial_value=tf.zeros(3), trainable=True)
 
-    self.critic_output = tf.keras.layers.Dense(1)
+    self.critic_output = keras.layers.Dense(1)
 
   def call(self, state):
     x = self.shared_dense1(state)
@@ -128,7 +128,8 @@ class ModelActorCritic(tf.keras.Model):
       loss, actor_loss, critic_loss = self.compute_loss(states, actions, returns, advantages)
 
     grads = tape.gradient(loss, self.trainable_variables)
-    optimizer.apply_gradients(zip(grads, self.trainable_variables))
+    if grads is not None:
+        optimizer.apply_gradients(zip(grads, self.trainable_variables))
     return loss, actor_loss, critic_loss
   
 

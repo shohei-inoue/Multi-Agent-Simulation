@@ -24,7 +24,7 @@ class AgentConfig:
     self.__learning_episode_num  = 1 # 学習なしの場合
 
     # 学習ありの場合
-    if self.__is_learning:
+    if self.__is_learning and param.learningParameter is not None:
       self.__learning_type         = param.learningParameter.type
       self.__model                 = Model(param.learningParameter.model)
       self.__learning_late         = param.learningParameter.learningLate
@@ -69,8 +69,8 @@ class AgentConfig:
     """
     行動を取得する
     """
-    if self.__is_learning:
-      action_tensor, action_dict = self.__agent.get_action(state, episode, log_dir)
+    if hasattr(self.__agent, 'get_action'):
+      action_tensor, action_dict = self.__agent.get_action(state, episode, log_dir)  # type: ignore
     else:
       # 非学習の場合、アルゴリズムのpolicyメソッドを使用
       # sampled_paramsは固定値を使用
@@ -86,8 +86,8 @@ class AgentConfig:
     """
     oneエピソード分の学習
     """
-    if self.__is_learning:
-      total_reward = self.__agent.train_one_episode(episode, log_dir=log_dir) # 報酬を返している
+    if hasattr(self.__agent, 'train_one_episode'):
+      total_reward = self.__agent.train_one_episode(episode, log_dir=log_dir)  # type: ignore
     else:
       # 非学習の場合の処理
       total_reward = self.__run_one_episode(episode, log_dir=log_dir)

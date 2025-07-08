@@ -230,7 +230,7 @@ class AlgorithmVfhFuzzy():
   
   def get_state_info(self, state, sampled_params):
     """
-    state内からこのpolicyで必要な情報を取得
+    state内からこのpolicyで必要な情報を取得（群ロボット探査最適化版）
     """
     keys = [
        "follower_collision_data", 
@@ -313,6 +313,7 @@ class AlgorithmVfhFuzzy():
     - 一つ前の探査方向を取得し次の方向から除外
     - リーダー機が衝突したのかを確認
     - 衝突がある場合、衝突方向を除外
+    - パラメータベースの探査戦略
     """
     def apply_direction_weight(base_azimuth: float, k: float, sharpness: float = 10.0):
       """
@@ -323,9 +324,9 @@ class AlgorithmVfhFuzzy():
 	    - decay: exp(-sharpness * (angle_diff)^2) を用いた減衰関数（ガウス的）
       """
       for i in range(self.BIN_NUM):
-        theta = 2 * math.pi * i / self.BIN_NUM
-        angle_diff = min(abs(theta - base_azimuth), 2 * math.pi - abs(theta - base_azimuth))
-        decay = 1 - (1 - k) * math.exp(-sharpness * (angle_diff ** 2))
+        theta = 2 * np.pi * i / self.BIN_NUM
+        angle_diff = min(abs(theta - base_azimuth), 2 * np.pi - abs(theta - base_azimuth))
+        decay = 1 - (1 - k) * np.exp(-sharpness * (angle_diff ** 2))
         histogram[i] *= decay
     
 
@@ -337,8 +338,8 @@ class AlgorithmVfhFuzzy():
       vm_pdf_max = np.exp(kappa) / (2 * np.pi * i0(kappa))  # 中心方向の最大値
 
       for i in range(self.BIN_NUM):
-          theta = 2 * math.pi * i / self.BIN_NUM
-          angle_diff = np.arctan2(math.sin(theta - base_azimuth), math.cos(theta - base_azimuth))
+          theta = 2 * np.pi * i / self.BIN_NUM
+          angle_diff = np.arctan2(np.sin(theta - base_azimuth), np.cos(theta - base_azimuth))
           vm_pdf = np.exp(kappa * np.cos(angle_diff)) / (2 * np.pi * i0(kappa))
           
           # 中心方向に向かうほど値が小さくなるように：1.0 - 正規化された vm_pdf
@@ -348,54 +349,64 @@ class AlgorithmVfhFuzzy():
     # ヒストグラムを初期化
     histogram = np.ones(self.BIN_NUM, dtype=np.float32)
 
-    # 前回探査方向の影響
-    # if self.agent_azimuth is not None:
-    #   reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
-    #   # apply_direction_weight(reverse_azimuth, self.k_e, sharpness=10.0)
-    #   apply_direction_weight_von(reverse_azimuth, self.k_e)
-    
-    # # 衝突方向の影響
-    # if self.agent_collision_flag: # 衝突があった場合
-    #     collision_azimuth = self.agent_azimuth
-    #     # apply_direction_weight(collision_azimuth, self.k_c, sharpness=20.0)
-    #     apply_direction_weight_von(collision_azimuth, self.k_e)]
-
-    # 探査済み方向（前回進んだ方向）を抑制　→ 正しい（check済み）
+    # 探査済み方向（前回進んだ方向）を抑制
     if self.agent_azimuth is not None:
         reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
         apply_direction_weight_von(reverse_azimuth, self.k_e)
 
-    # # 衝突方向を抑制
+    # 衝突方向を抑制
     if self.agent_collision_flag:
-        reverse_azimuth = (self.agent_azimuth + np.pi) % (2 * np.pi)  # 逆方向を計算
         apply_direction_weight_von(self.agent_azimuth, self.k_c)
 
-    
-    # ----- 周辺環境をstateで送ることになった場合に使用 ----
-    # # 未探査領域に向けてスコアを上げる 
-    # for bin in range(self.BIN_NUM):
-    #   angle = 2 * math.pi * bin / self.BIN_NUM
-    #   dx = int(round(math.cos(angle)))
-    #   dy = int(round(math.sin(angle)))
-    #   next_y = self.agent_coordinate_y + dy
-    #   next_x = self.agent_coordinate_x + dx
-
-    #   iy = int(next_y)
-    #   ix = int(next_x)
-
-    #   # 未探査のマスに向かう方向はスコアを強化（未探索促進）
-    #   if 0 <= iy < self.explored_map.shape[0] and 0 <= ix < self.explored_map.shape[1]:
-    #     if self.explored_map[iy, ix] == 0:
-    #       histogram[bin] *= 1.5  # 未探査方向強化
+    # === 群ロボット探査最適化: パラメータベースの探査戦略 ===
+    self._apply_parameter_based_exploration(histogram)
 
     histogram += 1e-6  # ゼロ割り防止
     histogram /= np.sum(histogram)
     return histogram
-  
+
+  def _apply_parameter_based_exploration(self, histogram):
+    """
+    パラメータベースの探査戦略（環境情報に依存しない）
+    - k_eに応じた探査行動の調整
+    - ランダム性と方向性のバランス
+    """
+    # k_eに応じた探査行動の調整
+    exploration_intensity = self.k_e / 50.0  # 0-1に正規化
+    
+    # 1. ランダム性の増加（探査促進）
+    randomness_factor = 1.0 + exploration_intensity * 0.3
+    for i in range(self.BIN_NUM):
+        histogram[i] *= (1.0 + np.random.uniform(-0.1, 0.1) * randomness_factor)
+    
+    # 2. 方向性の強化（k_eが大きいほど特定方向を重視）
+    if exploration_intensity > 0.5:
+        # 高探査モード：より積極的な方向選択
+        for i in range(self.BIN_NUM):
+            # 現在の方位から離れた方向を強化
+            if self.agent_azimuth is not None:
+                angle_diff = abs(2 * np.pi * i / self.BIN_NUM - self.agent_azimuth)
+                angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
+                if angle_diff > np.pi / 2:  # 90度以上離れた方向
+                    histogram[i] *= (1.0 + exploration_intensity * 0.5)
+    
+    # 3. 群ロボットの分散促進
+    # フォロワーの衝突データを活用して分散を促進
+    if len(self.follower_collision_data) > 0:
+        for azimuth, distance in self.follower_collision_data:
+            if distance < 1e-6:
+                continue
+            
+            # フォロワーがいる方向を避ける（分散促進）
+            for i in range(self.BIN_NUM):
+                angle = 2 * np.pi * i / self.BIN_NUM
+                angle_diff = min(abs(angle - azimuth), 2 * np.pi - abs(angle - azimuth))
+                if angle_diff < np.pi / 4:  # 45度以内の方向を抑制
+                    histogram[i] *= (1.0 - exploration_intensity * 0.3)
 
   def get_final_result_histogram(self, drivability, exploration_improvement) -> np.ndarray:
       """
-      ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す。
+      ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す（群ロボット探査最適化版）
       - drivability_histogram: 走行可能性ヒストグラム
       - exploration_improvement_histogram: 探査向上性ヒストグラム
       Returns:
@@ -405,17 +416,20 @@ class AlgorithmVfhFuzzy():
 
       fused_score = np.zeros(self.BIN_NUM, dtype=np.float32)
 
-      alpha = 10.0  # 抑制の鋭さ（高いほどしきい値で急激に抑制）
+      # 群ロボット探査最適化のためのパラメータ調整
+      alpha = 15.0  # 抑制の鋭さを増加（10.0 → 15.0）
+      exploration_weight = 1.5  # 探査向上性の重みを増加
 
       for bin in range(self.BIN_NUM):
           drive_val = drivability[bin]
           explore_val = exploration_improvement[bin]
 
-          # ソフト抑制係数（sigmoid的スケーリング）
+          # 探査率向上を重視したソフト抑制係数
           suppression = 1 / (1 + np.exp(-alpha * (drive_val - self.th)))
 
-          # 抑制付きのファジィ積推論
-          fused_score[bin] = suppression * drive_val * explore_val
+          # 探査向上性を重視したファジィ積推論
+          # 探査向上性の重みを増加し、探査効率を向上
+          fused_score[bin] = suppression * drive_val * (explore_val ** exploration_weight)
 
       fused_score += 1e-6  # ゼロ除け
       fused_score /= np.sum(fused_score)
@@ -425,6 +439,11 @@ class AlgorithmVfhFuzzy():
   
   
   def select_final_direction_by_weighted_sampling(self, result: np.ndarray) -> float:
+    """
+    群ロボット探査最適化版の方向選択アルゴリズム
+    - 探査効率を重視した重み付け
+    - より積極的な探査行動の促進
+    """
     q1, q2, q3 = np.quantile(result, [0.25, 0.5, 0.75])
 
     bins_very_good = [i for i, v in enumerate(result) if v >= q3 and v > 0.0]
@@ -443,10 +462,11 @@ class AlgorithmVfhFuzzy():
             print(f"[Fallback] No azimuth available. Returning random direction: {np.rad2deg(fallback_theta)} deg")
             return fallback_theta
 
-    # 重み付け（存在するカテゴリだけ使う）
-    score_q1 = 0.6 if bins_very_good else 0.0
-    score_q2 = 0.25 if bins_good else 0.0
-    score_q3 = 0.15 if bins_okay else 0.0
+    # 群ロボット探査最適化のための重み付け調整
+    # より積極的な探査行動を促進
+    score_q1 = 0.7 if bins_very_good else 0.0  # 0.6 → 0.7
+    score_q2 = 0.2 if bins_good else 0.0       # 0.25 → 0.2
+    score_q3 = 0.1 if bins_okay else 0.0       # 0.15 → 0.1
     total_score = score_q1 + score_q2 + score_q3
 
     # 正規化
@@ -454,7 +474,7 @@ class AlgorithmVfhFuzzy():
     score_q2 /= total_score if total_score > 0 else 1.0
     score_q3 /= total_score if total_score > 0 else 1.0
 
-    # 重みに従って構築（既に正規化済みなので再正規化不要）
+    # 重みに従って構築
     weights = []
     if bins_very_good:
         weights += [score_q1 / len(bins_very_good)] * len(bins_very_good)
