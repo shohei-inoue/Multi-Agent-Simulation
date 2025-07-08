@@ -14,6 +14,7 @@ from .observation_space import create_observation_space, create_initial_state
 from .reward import create_reward
 from robots.red import Red
 from params.simulation import Param
+from params.robot_logging import RobotLoggingConfig
 from scores.score import Score
 
 class Env(gym.Env):
@@ -72,7 +73,8 @@ class Env(gym.Env):
     )
 
     # ----- set scorer -----
-    self.scorer = Score()
+    robot_logging_config = RobotLoggingConfig()
+    self.scorer = Score(robot_logging_config=robot_logging_config)
 
     # ----- set explore infos -----
     self.total_area = np.count_nonzero(self.__map != self.__obstacle_value)  # 探査可能エリア
@@ -352,6 +354,18 @@ class Env(gym.Env):
         self.follower_robots[index].step_motion(agent_coordinate=self.agent_coordinate)
         self.update_exploration_map(previous_coordinate, self.follower_robots[index].coordinate)
 
+        # ロボットデータを記録
+        robot = self.follower_robots[index]
+        self.scorer.add_robot_data(
+            step=self.agent_step,
+            robot_id=robot.id,
+            x=robot.x,
+            y=robot.y,
+            collision_flag=robot.collision_flag,
+            boids_flag=robot.boids_flag.value,
+            distance=robot.distance
+        )
+
          # === 衝突フラグがTrueなら座標を追加 ===
         if self.follower_robots[index].collision_flag:
             cx = self.follower_robots[index].coordinate[1]
@@ -390,9 +404,12 @@ class Env(gym.Env):
 
     # フォロワから衝突データ収集
     follower_collision_data = []
+    current_follower_collision_count = 0
     for follower in self.follower_robots:
-        follower_collision_data.extend(follower.get_collision_data())  # List[Tuple[float, float]] # distance, azimuth
-        self.scorer.follower_collision_count += len(follower_collision_data)
+        collision_data = follower.get_collision_data()
+        follower_collision_data.extend(collision_data)  # List[Tuple[float, float]] # distance, azimuth
+        current_follower_collision_count += len(collision_data)
+        self.scorer.follower_collision_count += len(collision_data)
 
     # MAX_COLLISION_NUM 個だけ使う（足りない分はゼロ埋め）
     padded_list = follower_collision_data[:self.MAX_COLLISION_NUM]
@@ -435,6 +452,17 @@ class Env(gym.Env):
 
     distance = np.linalg.norm(self.agent_coordinate - self.previous_agent_coordinate)
     self.scorer.total_distance_traveled += distance
+    
+    # ステップごとのスコアデータを記録
+    self.scorer.add_step_data(
+        step=self.agent_step,
+        exploration_rate=self.exploration_ratio,
+        explored_area=self.explored_area,
+        total_area=self.total_area,
+        agent_collision_flag=self.state['agent_collision_flag'],
+        follower_collision_count=current_follower_collision_count,
+        reward=reward
+    )
 
     return self.state, reward, done, turncated, {}
   

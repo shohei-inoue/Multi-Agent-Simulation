@@ -40,7 +40,7 @@ class A2CAgent(BaseAgent):
     self.action_space          = action_space
   
 
-  def get_action(self, state, episode, log_dir: str = None): # stateは辞書型で送られてくる
+  def get_action(self, state, episode, log_dir: str | None = None): # stateは辞書型で送られてくる
     # 状態をテンソルに変換
     state_vec = tf.convert_to_tensor([flatten_state(state)], dtype=tf.float32)
 
@@ -130,7 +130,7 @@ class A2CAgent(BaseAgent):
     return np.array(returns, dtype=np.float32), np.array(advantages, dtype=np.float32)
   
 
-  def train_one_episode(self, episode: int = 0, log_dir: str = None):
+  def train_one_episode(self, episode: int = 0, log_dir: str | None = None):
     self.env_frames = []
     self.current_fig = self.setup_rendering()
 
@@ -167,7 +167,7 @@ class A2CAgent(BaseAgent):
 
   def train(self, episodes, csv_path):
      for episode in range(episodes):
-        total_reward = self.train_one_episode(episode=episode, csv_path=csv_path)
+        total_reward = self.train_one_episode(episode=episode, log_dir=csv_path)
         print(f"Episode {episode + 1}: Total Reward = {total_reward}")
   
 
@@ -222,8 +222,11 @@ class A2CAgent(BaseAgent):
     buf.close()
   
 
-  def save_gif(self, save_dir: str, episode: int):
+  def save_gif(self, save_dir: str | None, episode: int):
     from pathlib import Path
+    if save_dir is None:
+        return
+        
     gif_dir = Path(save_dir) / "gifs"
     gif_dir.mkdir(parents=True, exist_ok=True)
     gif_path = gif_dir / f"episode_{episode:04d}.gif"

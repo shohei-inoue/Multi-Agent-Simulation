@@ -125,7 +125,7 @@ class AlgorithmVfhFuzzy():
 
 
 
-  def policy(self, state, sampled_params, episode, log_dir: str = None):
+  def policy(self, state, sampled_params, episode, log_dir: str | None = None):
     """
     行動決定ポリシー
     - 学習ありなら sampled_params を用いてパラメータを更新

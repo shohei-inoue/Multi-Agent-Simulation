@@ -9,6 +9,7 @@ import json
 import os
 import numpy as np
 import tensorflow as tf
+import pandas as pd
 
 
 class LearningType(str, Enum):
@@ -64,14 +65,17 @@ class AgentConfig:
     )
   
   
-  def get_action(self, state, episode, log_dir: str = None):
+  def get_action(self, state, episode, log_dir: str | None = None):
     """
     行動を取得する
     """
     if self.__is_learning:
       action_tensor, action_dict = self.__agent.get_action(state, episode, log_dir)
     else:
-      action_tensor, action_dict = self.__agent.policy(state, episode, log_dir)
+      # 非学習の場合、アルゴリズムのpolicyメソッドを使用
+      # sampled_paramsは固定値を使用
+      sampled_params = np.array([self.__algorithm.th, self.__algorithm.k_e, self.__algorithm.k_c])
+      action_tensor, action_dict = self.__algorithm.policy(state, sampled_params, episode, log_dir)
     
     return action_tensor, action_dict
       
@@ -82,9 +86,36 @@ class AgentConfig:
     """
     oneエピソード分の学習
     """
-    total_reward = self.__agent.train_one_episode(episode, log_dir=log_dir) # 報酬を返している
+    if self.__is_learning:
+      total_reward = self.__agent.train_one_episode(episode, log_dir=log_dir) # 報酬を返している
+    else:
+      # 非学習の場合の処理
+      total_reward = self.__run_one_episode(episode, log_dir=log_dir)
 
-    # TODO 非学習の場合の処理を追加
+    # エピソード終了時にCSVを保存
+    self.__env.scorer.save_episode_csv(log_dir, episode)
+    
+    # エピソード全体のスコアサマリーを保存
+    self.save_episode_summary(log_dir, episode, total_reward)
+
+    return total_reward
+    
+  def __run_one_episode(self, episode: int, log_dir: str):
+    """
+    非学習の場合の1エピソード実行
+    """
+    state = self.__env.reset()
+    total_reward = 0
+    done = False
+    step_count = 0
+
+    while not done and step_count < self.__max_steps_per_episode:
+      action_tensor, action_dict = self.get_action(state, episode, log_dir)
+      next_state, reward, done, truncated, info = self.__env.step(action_dict)
+      
+      total_reward += reward
+      state = next_state
+      step_count += 1
 
     return total_reward
     
@@ -95,6 +126,7 @@ class AgentConfig:
     学習
     """
     all_rewards = []
+    all_episode_summaries = []
     self.__summary_writer = tf.summary.create_file_writer(os.path.join(log_dir, "tensorboard"))
     start_time = time.time()
 
@@ -109,6 +141,20 @@ class AgentConfig:
           tf.summary.scalar("Follower Collisions", self.__env.scorer.follower_collision_count, step=episode)
           tf.summary.scalar("Agent Collisions", self.__env.scorer.agent_collision_count, step=episode)
 
+        # エピソードサマリーを収集
+        episode_summary = {
+            "episode": episode,
+            "total_reward": total_reward,
+            "final_exploration_rate": self.__env.scorer.exploration_rate[-1] if self.__env.scorer.exploration_rate else 0.0,
+            "max_exploration_rate": max(self.__env.scorer.exploration_rate) if self.__env.scorer.exploration_rate else 0.0,
+            "total_steps": len(self.__env.scorer.exploration_rate),
+            "goal_reaching_step": self.__env.scorer.goal_reaching_step,
+            "agent_collision_count": self.__env.scorer.agent_collision_count,
+            "follower_collision_count": self.__env.scorer.follower_collision_count,
+            "total_distance_traveled": self.__env.scorer.total_distance_traveled
+        }
+        all_episode_summaries.append(episode_summary)
+
     end_time = time.time()
     training_duration = end_time - start_time
 
@@ -117,6 +163,9 @@ class AgentConfig:
         rewards=all_rewards,
         duration=training_duration
     )
+    
+    # 全エピソードのスコアをCSVとして保存
+    self.save_all_episodes_csv(log_dir, all_episode_summaries)
 
     self.__summary_writer.close()
 
@@ -128,7 +177,21 @@ class AgentConfig:
     
     # モデル保存
     self.save_model(log_dir=log_dir)
-  
+    
+  def save_all_episodes_csv(self, log_dir: str, all_episode_summaries: list):
+    """
+    全エピソードのスコアをCSVとして保存
+    """
+    csv_dir = os.path.join(log_dir, "csvs")
+    os.makedirs(csv_dir, exist_ok=True)
+    
+    # DataFrameに変換
+    df = pd.DataFrame(all_episode_summaries)
+    
+    # CSVとして保存
+    csv_path = os.path.join(csv_dir, "all_episodes_summary.csv")
+    df.to_csv(csv_path, index=False)
+    print(f"All episodes summary saved to: {csv_path}")
 
   def save_summary(self, log_dir: str, rewards: list[float], duration: float):
     scorer = self.__env.scorer
@@ -166,3 +229,33 @@ class AgentConfig:
     model_path = os.path.join(model_dir, "agent_model.keras")
     self.__model.model.save(model_path)
     print(f"Model saved to {model_path}")
+
+  def save_episode_summary(self, log_dir: str, episode: int, total_reward: float):
+    """
+    エピソード全体のスコアサマリーを保存
+    """
+    scorer = self.__env.scorer
+    
+    # エピソードサマリー
+    episode_summary = {
+        "episode": episode,
+        "total_reward": total_reward,
+        "final_exploration_rate": scorer.exploration_rate[-1] if scorer.exploration_rate else 0.0,
+        "max_exploration_rate": max(scorer.exploration_rate) if scorer.exploration_rate else 0.0,
+        "total_steps": len(scorer.exploration_rate),
+        "goal_reaching_step": scorer.goal_reaching_step,
+        "agent_collision_count": scorer.agent_collision_count,
+        "follower_collision_count": scorer.follower_collision_count,
+        "total_distance_traveled": scorer.total_distance_traveled,
+        "exploration_rate_curve": scorer.exploration_rate
+    }
+    
+    # JSONとして保存
+    summary_dir = os.path.join(log_dir, "metrics")
+    os.makedirs(summary_dir, exist_ok=True)
+    summary_path = os.path.join(summary_dir, f"episode_{episode:04d}_summary.json")
+    
+    with open(summary_path, "w") as f:
+        json.dump(episode_summary, f, indent=2, default=str)
+    
+    print(f"Episode {episode} summary saved to: {summary_path}")
