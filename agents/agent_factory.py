@@ -1,7 +1,18 @@
+"""
+Agent factory for creating different types of agents.
+Provides centralized agent creation with configuration management.
+"""
+
+from typing import Dict, Any, Optional
 from agents.agent_a2c import A2CAgent
 import tensorflow as tf
 
-def create_agent(agent_type: str, **kwargs):
+from core.logging import get_component_logger
+
+logger = get_component_logger("agent_factory")
+
+
+def create_agent(agent_type: str, **kwargs) -> Any:
     if agent_type == "a2c":
         # --- オプティマイザ変換 ---
         if isinstance(kwargs["optimizer"], str):

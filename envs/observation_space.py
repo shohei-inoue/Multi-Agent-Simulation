@@ -11,8 +11,10 @@ def create_observation_space() -> gym.spaces.Dict:
     - agent_collision_flag    ∈ {0, 1}: float (scalar)
     - agent_step_count        ∈ [0, ∞): float (scalar)
     - follower_collision_data ∈ [0, ∞): float (vector) TODO 追加必要
+    - follower_mobility_scores ∈ [0, 1]: float (vector) 動きやすさ指標
   """
   MAX_COLLISION_NUM = 100  # 最大フォロワー数 × 各フォロワの最大衝突数
+  MAX_ROBOT_NUM = 10       # 最大ロボット数
   return gym.spaces.Dict({
     "agent_coordinate_x"     : gym.spaces.Box(low=0.0, high=np.inf, shape=(), dtype=np.float32),  
     "agent_coordinate_y"     : gym.spaces.Box(low=0.0, high=np.inf, shape=(), dtype=np.float32),  
@@ -23,6 +25,12 @@ def create_observation_space() -> gym.spaces.Dict:
             low=0.0,
             high=np.inf,
             shape=(MAX_COLLISION_NUM * 2,),  # distance と azimuth # TODO azimuthがどちらから見たazimuthなのか確認
+            dtype=np.float32
+        ),
+    "follower_mobility_scores": gym.spaces.Box(
+            low=0.0,
+            high=1.0,
+            shape=(MAX_ROBOT_NUM,),  # 最大ロボット数分のmobility_score
             dtype=np.float32
         ),
   })
@@ -51,5 +59,9 @@ def create_initial_state(coordinate_x, coordinate_y, azimuth, collision_flag, ag
             padded_list.append(np.array([0.0, 0.0], dtype=np.float32))
 
     state["follower_collision_data"] = padded_list
+
+    # follower_mobility_scoresの初期化
+    MAX_ROBOT_NUM = 10
+    state["follower_mobility_scores"] = [0.0] * MAX_ROBOT_NUM
 
     return state

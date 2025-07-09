@@ -23,8 +23,8 @@ class ModelActorCritic(keras.Model):
     self.shared_dense1 = keras.layers.Dense(128, activation='relu')
     self.shared_dense2 = keras.layers.Dense(64, activation='relu')
 
-    self.mu_output  = keras.layers.Dense(3)
-    self.log_std    = tf.Variable(initial_value=tf.zeros(3), trainable=True)
+    self.mu_output  = keras.layers.Dense(5)
+    self.log_std    = tf.Variable(initial_value=tf.zeros(5), trainable=True)
 
     self.critic_output = keras.layers.Dense(1)
 
@@ -38,10 +38,14 @@ class ModelActorCritic(keras.Model):
     # th: 0-1（走行可能性閾値）
     # k_e: 0-SCALE_MAX（探査向上性重み）
     # k_c: 0-SCALE_MAX（衝突回避重み）
+    # branch_threshold: 0-1
+    # merge_threshold: 0-1
     th     = tf.nn.sigmoid(raw_mu[:, 0:1])               # shape = (batch, 1)
-    k_e_c  = tf.nn.sigmoid(raw_mu[:, 1:]) * SCALE_MAX    # shape = (batch, 2)
+    k_e_c  = tf.nn.sigmoid(raw_mu[:, 1:3]) * SCALE_MAX   # shape = (batch, 2)
+    branch_threshold = tf.nn.sigmoid(raw_mu[:, 3:4])     # shape = (batch, 1)
+    merge_threshold  = tf.nn.sigmoid(raw_mu[:, 4:5])     # shape = (batch, 1)
 
-    mu = tf.concat([th, k_e_c], axis=-1)  # shape = (batch, 3)
+    mu = tf.concat([th, k_e_c, branch_threshold, merge_threshold], axis=-1)  # shape = (batch, 5)
     std = tf.exp(self.log_std)
 
     value = self.critic_output(x)

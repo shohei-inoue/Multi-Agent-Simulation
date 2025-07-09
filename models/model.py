@@ -1,11 +1,23 @@
+"""
+Model class for neural network architectures.
+Provides model creation and management for learning agents.
+"""
+
 from models.actor_critic import ModelActorCritic
 from enum import Enum
 import tensorflow as tf
+from typing import Dict, Any, Optional
+
+from core.interfaces import Configurable, Stateful, Loggable
+from core.logging import get_component_logger
+
 
 class ModelType(str, Enum):
+    """Supported model types"""
     ACTOR_CRITIC = "actor-critic"
 
-class Model:
+
+class Model(Configurable, Stateful, Loggable):
     def __init__(self, model_name: str, input_dim: int = 32):
         self.model_name = model_name
         self.model = self.__init__model(model_name, input_dim)

@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import os
 from typing import List, Dict, Any
+import matplotlib
+matplotlib.use('Agg')  # 非インタラクティブバックエンドを使用
 import matplotlib.pyplot as plt
 from PIL import Image
 import io
@@ -38,6 +40,10 @@ class A2CAgent(BaseAgent):
     self.n_steps               = n_steps
     self.max_steps_per_episode = max_steps_per_episode
     self.action_space          = action_space
+    
+    # Initialize GIF frames list
+    self.env_frames = []
+    self.frame_size = None
   
 
   def get_action(self, state, episode, log_dir: str | None = None): # stateは辞書型で送られてくる
@@ -67,13 +73,16 @@ class A2CAgent(BaseAgent):
         action_tensor, action_dict = self.get_action(state, episode, log_dir=csv_path)
         next_state, reward, done, turncated, infos = self.env.step(action_dict)
 
-        # 可視化更新（統合）
-        if hasattr(self.env, "render") and self.env._render_flag:
-            self.env.render(ax=self.env._render_ax)
-        if hasattr(self.algorithm, "render") and self.algorithm._render_flag:
-            self.algorithm.render(ax_params=self.algorithm._ax_params, ax_polar=self.algorithm._ax_polar)
+        # リアルタイム描画は無効化（コメントアウト）
+        # if hasattr(self.env, "render") and self.env._render_flag:
+        #     self.env.render(ax=self.env._render_ax)
+        # if hasattr(self.algorithm, "render") and self.algorithm._render_flag:
+        #     self.algorithm.render(ax_params=self.algorithm._ax_params, ax_polar=self.algorithm._ax_polar)
         
-        # フレームキャプチャ
+        # リアルタイム描画の更新（無効化）
+        # plt.pause(0.01)  # 10ms待機して描画を更新
+        
+        # GIF保存用のフレームキャプチャ（有効）
         self.capture_frame()
 
         # ログ構築
@@ -131,8 +140,9 @@ class A2CAgent(BaseAgent):
   
 
   def train_one_episode(self, episode: int = 0, log_dir: str | None = None):
+    # GIF保存用のフレーム初期化（リアルタイム描画は無効）
     self.env_frames = []
-    self.current_fig = self.setup_rendering()
+    # self.current_fig = self.setup_rendering()  # リアルタイム描画は無効
 
     state = self.env.reset()
     total_reward = 0
@@ -156,11 +166,17 @@ class A2CAgent(BaseAgent):
       state = next_state if not done else self.env.reset()
       step_count += 1 # ステップ数更新
     
+    # エピソードごとのステップ数を記録
+    self.step_count = step_count
+    
     # 終了後にログ出力
-    self.save_gif(log_dir, episode)
+    self.save_gif(log_dir, episode)  # GIF保存は有効
     self.save_metrics(log_dir, episode, total_reward)
     self.save_model(log_dir, episode)
     self.log_tensorboard(log_dir, episode, total_reward)
+    
+    # リアルタイム描画を無効化
+    # plt.ioff()
     
     return total_reward
 
@@ -173,7 +189,7 @@ class A2CAgent(BaseAgent):
 
   def setup_rendering(self):
     self.env.capture_frame = self.capture_frame
-    # plt.ion() # 描画off はコメントアウト
+    plt.ion() # リアルタイム描画を有効化
 
     # 3列 x 4行 のグリッドに調整（2行目はスペーサー）
     fig = plt.figure(figsize=(12, 14))
@@ -202,24 +218,51 @@ class A2CAgent(BaseAgent):
     self.algorithm._ax_polar = ax_polar
     self.algorithm._render_flag = True
 
-    # fig.show() # 描画off はコメントアウト
+    fig.show() # リアルタイム描画を有効化
     return fig
   
 
   def capture_frame(self):
-    buf = io.BytesIO()
-    self.current_fig.savefig(buf, format='png')
-    buf.seek(0)
-    img = Image.open(buf).convert("RGB")
-
-    # サイズ統一処理
-    if hasattr(self, "frame_size"):
-        img = img.resize(self.frame_size)
-    else:
-        self.frame_size = img.size  # 初回にサイズを保存
-
-    self.env_frames.append(img)
-    buf.close()
+    # GIF保存用のフレームキャプチャ（リアルタイム描画なし）
+    # 環境の描画を非表示で実行してフレームをキャプチャ
+    if hasattr(self.env, "render"):
+        try:
+            # rgb_arrayモードで環境を描画
+            img_array = self.env.render(mode='rgb_array', fig_size=8)
+            
+            # numpy配列をPIL Imageに変換
+            img = Image.fromarray(img_array)
+            
+            # サイズ統一処理
+            if hasattr(self, "frame_size") and self.frame_size is not None:
+                img = img.resize(self.frame_size)
+            else:
+                self.frame_size = img.size  # 初回にサイズを保存
+            
+            self.env_frames.append(img)
+            
+        except Exception as e:
+            print(f"Error capturing frame: {e}")
+            # フォールバック: 基本的な描画
+            fig, ax = plt.subplots(figsize=(8, 8))
+            self.env.render(ax=ax)
+            
+            # フレームをキャプチャ
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+            buf.seek(0)
+            img = Image.open(buf).convert("RGB")
+            
+            # サイズ統一処理
+            if hasattr(self, "frame_size") and self.frame_size is not None:
+                img = img.resize(self.frame_size)
+            else:
+                self.frame_size = img.size  # 初回にサイズを保存
+            
+            self.env_frames.append(img)
+            buf.close()
+            plt.close(fig)  # メモリリーク防止
+            plt.clf()  # 追加のクリーンアップ
   
 
   def save_gif(self, save_dir: str | None, episode: int):

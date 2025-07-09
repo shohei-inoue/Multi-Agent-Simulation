@@ -14,31 +14,63 @@ class AlgorithmVfhFuzzy():
   ANGLES        = np.linspace(0, 2 * np.pi, BIN_NUM, endpoint=False)  # 角度
 
 
-  def __init__(self, th=1.0, k_e=5.0, k_c=5.0):
+  def __init__(self, env=None):
     """
-    使用パラメータを初期化
+    初期化
     """
-    self.th = th
-    self.k_e = k_e
-    self.k_c = k_c
-    self.th_history = []  # thの履歴
-    self.k_e_history = []  # k_eの履歴
-    self.k_c_history = []  # k_cの履歴
+    # 環境への参照を保存
+    self.env = env
+    
+    # 可視化用の軸
+    self._render_flag = False
+    self._ax_params = None
+    self._ax_polar = None
+    
+    # パラメータ
+    self.th = 0.5
+    self.k_e = 10.0
+    self.k_c = 5.0
+    
+    # 履歴
+    self.th_history = []
+    self.k_e_history = []
+    self.k_c_history = []
     self.selected_theta = []
-    self.update_params(self.th, self.k_e, self.k_c)
+    
+    # 状態情報
+    self.agent_coordinate_x = 0.0
+    self.agent_coordinate_y = 0.0
+    self.agent_azimuth = None
+    self.agent_collision_flag = False
+    self.agent_step_count = 0
+    self.follower_collision_data = []
+    
+    # ヒストグラム
+    self.BIN_NUM = 72
+    self.BIN_SIZE_DEG = 360 // self.BIN_NUM
+    self.ANGLES = np.linspace(0, 2 * np.pi, self.BIN_NUM, endpoint=False)
+    
+    # 結果
+    self.drivability_histogram = None
+    self.exploration_improvement_histogram = None
+    self.result_histogram = None
+    self.theta = 0.0
+    self.mode = 0
 
 
-  def update_params(self, th, k_e, k_c):
+  def update_params(self, th, k_e, k_c, branch_threshold=None, merge_threshold=None):
     """
     パラメータの更新
     """
-    self.th_history.append(th)
-    self.k_e_history.append(k_e)
-    self.k_c_history.append(k_c)
-
     self.th = th
     self.k_e = k_e
     self.k_c = k_c
+    
+    # 分岐・統合の閾値も保存（オプション）
+    if branch_threshold is not None:
+        self.branch_threshold = branch_threshold
+    if merge_threshold is not None:
+        self.merge_threshold = merge_threshold
   
 
   def render(self, ax_polar=None, ax_params=None):
@@ -158,8 +190,8 @@ class AlgorithmVfhFuzzy():
     # 最終方向
     self.theta = self.select_final_direction_by_weighted_sampling(result=self.result_histogram)
 
-    # TODO ブランチパラメータを作成
-    self.mode = 0
+    # 群分岐・統合のmode決定
+    self.mode = self._determine_swarm_mode(state, sampled_params)
 
     # 行動の出力を作成
     action = {
@@ -192,10 +224,44 @@ class AlgorithmVfhFuzzy():
         self._ax_params[0].figure.canvas.draw()
         self._ax_params[0].figure.canvas.flush_events()
 
-    self.update_params(*sampled_params)  # th, k_e, k_c を更新
+    self.update_params(sampled_params[0], sampled_params[1], sampled_params[2])  # th, k_e, k_c を更新
 
     return action_tensor, action
   
+
+  def _determine_swarm_mode(self, state, sampled_params):
+    """
+    群分岐・統合のmodeを決定
+    - mode 0: 通常動作（単一群）
+    - mode 1: 群分岐（新しいleaderを作成）
+    - mode 2: 群統合（他の群に統合）
+    followerのmobility_scoreと学習パラメータの閾値で判定
+    """
+    # sampled_params: [th, k_e, k_c, branch_threshold, merge_threshold]
+    if len(sampled_params) >= 5:
+        branch_threshold = sampled_params[3]
+        merge_threshold = sampled_params[4]
+    else:
+        branch_threshold = 0.3
+        merge_threshold = 0.7
+
+    mobility_scores = state.get('follower_mobility_scores', [])
+    if len(mobility_scores) == 0:
+        return 0
+    
+    # followerの数を確認（mobility_scoresの非ゼロ要素数）
+    follower_count = sum(1 for score in mobility_scores if score > 0.0)
+    
+    avg_mobility = np.mean(mobility_scores)
+
+    # 分岐判定（followerが3台以上の場合のみ）
+    if follower_count >= 3 and avg_mobility < branch_threshold:
+        return 1  # 群分岐
+    # 統合判定
+    if avg_mobility > merge_threshold:
+        return 2  # 群統合
+    return 0  # 通常動作
+
 
   def save_algorithm_parameter_to_csv(self, log_dir: str, step: int,
         episode: int,
@@ -314,6 +380,7 @@ class AlgorithmVfhFuzzy():
     - リーダー機が衝突したのかを確認
     - 衝突がある場合、衝突方向を除外
     - パラメータベースの探査戦略
+    - 未探査領域への誘導強化
     """
     def apply_direction_weight(base_azimuth: float, k: float, sharpness: float = 10.0):
       """
@@ -355,8 +422,13 @@ class AlgorithmVfhFuzzy():
         apply_direction_weight_von(reverse_azimuth, self.k_e)
 
     # 衝突方向を抑制
-    if self.agent_collision_flag:
+    if self.agent_collision_flag and self.agent_azimuth is not None:
         apply_direction_weight_von(self.agent_azimuth, self.k_c)
+
+    # === 未探査領域への誘導強化 ===
+    # 環境から探査マップを取得して未探査領域の方向を強化
+    if hasattr(self, 'env') and hasattr(self.env, 'explored_map'):
+        self._apply_unexplored_area_guidance(histogram)
 
     # === 群ロボット探査最適化: パラメータベースの探査戦略 ===
     self._apply_parameter_based_exploration(histogram)
@@ -487,3 +559,42 @@ class AlgorithmVfhFuzzy():
     selected_angle = 2 * np.pi * selected_bin / self.BIN_NUM
 
     return selected_angle
+
+  def _apply_unexplored_area_guidance(self, histogram):
+    """
+    未探査領域への誘導を強化する
+    - 探査マップから未探査領域の方向を特定
+    - 未探査領域の方向を強化
+    """
+    if not hasattr(self.env, 'explored_map') or self.env.explored_map is None:
+        return
+    
+    # 現在位置から各方向の未探査率を計算
+    current_x = int(self.agent_coordinate_x)
+    current_y = int(self.agent_coordinate_y)
+    
+    # 探査範囲（現在位置から一定距離内）
+    scan_radius = 10
+    
+    for i in range(self.BIN_NUM):
+        angle = 2 * np.pi * i / self.BIN_NUM
+        unexplored_count = 0
+        total_count = 0
+        
+        # 各方向の未探査率を計算
+        for distance in range(1, scan_radius + 1):
+            check_x = int(current_x + distance * np.cos(angle))
+            check_y = int(current_y + distance * np.sin(angle))
+            
+            # マップ範囲内かチェック
+            if (0 <= check_y < self.env.explored_map.shape[0] and 
+                0 <= check_x < self.env.explored_map.shape[1]):
+                total_count += 1
+                if self.env.explored_map[check_y, check_x] == 0:  # 未探査
+                    unexplored_count += 1
+        
+        # 未探査率に基づいて方向を強化
+        if total_count > 0:
+            unexplored_ratio = unexplored_count / total_count
+            # 未探査率が高い方向を強化
+            histogram[i] *= (1.0 + unexplored_ratio * 2.0)

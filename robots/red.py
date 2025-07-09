@@ -1,9 +1,18 @@
+"""
+Robot class for swarm exploration simulation.
+Implements individual robot behavior with role-based actions.
+"""
+
 import numpy as np
 import math
 import pandas as pd
 import os
 import random
 from enum import Enum
+from typing import Dict, Any, Optional, Tuple, List
+
+from core.interfaces import Configurable, Stateful, Loggable
+from core.logging import get_component_logger
 
 class BoidsType(Enum):
     """
@@ -12,6 +21,14 @@ class BoidsType(Enum):
     NONE  = 0
     OUTER = 1
     INNER = 2
+
+
+class RobotRole(Enum):
+    """
+    ロボットの役割
+    """
+    FOLLOWER = 0
+    LEADER = 1
 
 
 class Red():
@@ -42,6 +59,7 @@ class Red():
     collision_flag: bool = False,
     boids_flag: BoidsType = BoidsType.NONE,
     estimated_probability: float = 0.0,
+    role: RobotRole = RobotRole.FOLLOWER,
   ):
     """
     initialize RED
@@ -78,6 +96,19 @@ class Red():
     self.collision_flag: bool         = collision_flag
     self.boids_flag: BoidsType        = boids_flag
     self.estimated_probability: float = estimated_probability
+    self.role: RobotRole              = role
+    
+    # ----- leader specific attributes -----
+    self.leader_azimuth: float        = 0.0  # leaderとしての方位角
+    self.leader_step_count: int       = 0    # leaderとしてのステップ数
+    
+    # ----- swarm management -----
+    self.swarm_id: int                = 0    # 所属群ID
+    
+    # ----- mobility metrics -----
+    self.mobility_score: float        = 0.0  # 動きやすさスコア
+    self.collision_density: float     = 0.0  # 衝突密度
+    self.space_availability: float    = 0.0  # 空間利用可能性
 
     # ----- data set -----
     self.data                         = self.get_arguments()
@@ -130,6 +161,61 @@ class Red():
         'boids_flag': self.boids_flag.value,
         'estimated_probability': self.estimated_probability,
     }
+
+
+  def calculate_mobility_metrics(self) -> dict:
+    """
+    followerの動きやすさ指標を計算
+    """
+    # 衝突密度の計算（近傍の障害物密度）
+    collision_density = 0.0
+    space_availability = 0.0
+    
+    # 8方向の空間利用可能性をチェック
+    directions = [
+        (0, 1), (1, 1), (1, 0), (1, -1),
+        (0, -1), (-1, -1), (-1, 0), (-1, 1)
+    ]
+    
+    available_directions = 0
+    total_directions = len(directions)
+    
+    for dy, dx in directions:
+        check_y = int(self.y + dy)
+        check_x = int(self.x + dx)
+        
+        # マップ内かチェック
+        if (0 <= check_y < self.__map_height and 
+            0 <= check_x < self.__map_width):
+            
+            # 障害物でない場合
+            if self.__map[check_y, check_x] != self.__obstacle_value:
+                available_directions += 1
+            else:
+                collision_density += 1.0 / total_directions
+    
+    # 空間利用可能性（0-1の値）
+    space_availability = available_directions / total_directions
+    
+    # 動きやすさスコアの計算
+    # 空間利用可能性が高く、衝突密度が低いほど高いスコア
+    mobility_score = space_availability * (1.0 - collision_density)
+    
+    # 距離による重み付け（leaderから遠いほど動きにくい）
+    distance_weight = max(0.1, 1.0 - (self.distance / self.__boundary_outer))
+    mobility_score *= distance_weight
+    
+    # 値を更新
+    self.mobility_score = mobility_score
+    self.collision_density = collision_density
+    self.space_availability = space_availability
+    
+    return {
+        'mobility_score': mobility_score,
+        'collision_density': collision_density,
+        'space_availability': space_availability,
+        'distance_weight': distance_weight
+    }
   
 
   def get_csv(self, episode, data_time):
@@ -174,6 +260,10 @@ class Red():
     self.azimuth = self.azimuth_adjustment()
     self.step += 1
 
+    # mobility_scoreを更新
+    if self.role == RobotRole.FOLLOWER:
+        self.calculate_mobility_metrics()
+
     self.data = pd.concat([self.data, self.get_arguments()])
     self.one_explore_data = pd.concat([self.one_explore_data, self.get_arguments()])
 
@@ -194,7 +284,125 @@ class Red():
       print(f"[ERROR] Red({self.id}) has NaN coordinate after move: {self.coordinate}")
 
 
-  
+  def set_role(self, role: RobotRole):
+    """
+    ロボットの役割を設定
+    """
+    self.role = role
+    if role == RobotRole.LEADER:
+        self.leader_step_count = 0
+        self.leader_azimuth = self.direction_angle
+        
+        # リーダーになった時点で軌跡データをリセット
+        # 新しいリーダーとしての軌跡を開始
+        self.leader_trajectory_start_step = self.step
+        self.leader_trajectory_data = pd.DataFrame(columns=[
+            'step', 'x', 'y', 'coordinate', 'amount_of_movement',
+            'direction_angle', 'distance', 'azimuth',
+            'collision_flag', 'boids_flag', 'estimated_probability'
+        ])
+        # 現在位置を最初の軌跡点として追加
+        self.leader_trajectory_data = pd.concat([
+            self.leader_trajectory_data, 
+            self.get_arguments()
+        ])
+
+
+  def get_leader_action(self, algorithm, state, sampled_params, episode, log_dir):
+    """
+    leaderとしての行動を取得
+    """
+    if self.role != RobotRole.LEADER:
+        raise ValueError(f"Robot {self.id} is not a leader")
+    
+    # 各リーダーが独立したアルゴリズムインスタンスを使用
+    # リーダー固有のアルゴリズムインスタンスを取得または作成
+    if not hasattr(self, 'leader_algorithm'):
+        # 新しいアルゴリズムインスタンスを作成
+        from algorithms.algorithm_factory import select_algorithm
+        self.leader_algorithm = select_algorithm('vfh_fuzzy', env=None)
+    
+    # リーダー固有の状態を使用
+    leader_state = state
+    
+    # アルゴリズムで行動決定
+    action_tensor, action_dict = self.leader_algorithm.policy(leader_state, sampled_params, episode, log_dir)
+    
+    return action_tensor, action_dict
+
+
+  def execute_leader_action(self, action_dict):
+    """
+    leaderとしての行動を実行
+    """
+    if self.role != RobotRole.LEADER:
+        raise ValueError(f"Robot {self.id} is not a leader")
+    
+    # 行動を実行
+    theta = action_dict.get('theta', 0.0)
+    self.leader_azimuth = theta
+    
+    # 移動量を計算
+    dx = self.__boundary_outer * math.cos(theta)
+    dy = self.__boundary_outer * math.sin(theta)
+    
+    # 次の位置を計算
+    next_coordinate = self.coordinate + np.array([dy, dx])
+    
+    # 衝突判定
+    if (0 < next_coordinate[0] < self.__map_height and 
+        0 < next_coordinate[1] < self.__map_width):
+        map_y = int(next_coordinate[0])
+        map_x = int(next_coordinate[1])
+        
+        if self.__map[map_y, map_x] == self.__obstacle_value:
+            self.collision_flag = True
+            # 衝突時は現在位置を維持
+            return False
+        else:
+            self.collision_flag = False
+            self.coordinate = next_coordinate
+            self.x = self.coordinate[1]
+            self.y = self.coordinate[0]
+            self.direction_angle = theta
+            self.leader_step_count += 1
+            
+            # データの更新
+            self.step += 1
+            self.distance = np.linalg.norm(self.coordinate - self.agent_coordinate)
+            self.azimuth = self.azimuth_adjustment()
+            
+            # データフレームに新しい位置を追加
+            self.data = pd.concat([self.data, self.get_arguments()])
+            self.one_explore_data = pd.concat([self.one_explore_data, self.get_arguments()])
+            
+            # リーダー軌跡データにも追加
+            if hasattr(self, 'leader_trajectory_data'):
+                self.leader_trajectory_data = pd.concat([
+                    self.leader_trajectory_data, 
+                    self.get_arguments()
+                ])
+            
+            # バッファにも追加
+            self._data_buffer.append([
+                self.step,
+                self.x, self.y,
+                self.coordinate.copy(),
+                self.amount_of_movement,
+                self.direction_angle,
+                self.distance,
+                self.azimuth,
+                self.collision_flag,
+                self.boids_flag.value,
+                self.estimated_probability
+            ])
+            
+            return True
+    else:
+        self.collision_flag = True
+        return False
+
+
   def finalize_data(self):
     columns = [
         'step', 'x', 'y', 'coordinate', 'amount_of_movement',
