@@ -480,6 +480,7 @@ app.run_experiment(experiment_config)
   - `gifs/episode_0000.gif`: エピソードごとの GIF アニメーション
   - `metrics/episode_0000.json`: エピソードごとのメトリクス
   - `models/checkpoint_0000.keras`: エピソードごとの学習済みモデル
+  - `csvs/trajectory_episode_0000.csv`: エピソードごとの軌跡データ
   - `csvs/experiment_xxx.json`: 実験結果のサマリー
   - `tensorboard/`: TensorBoard 用のログファイル
 
@@ -668,7 +669,20 @@ experiment_config = ExperimentConfig(
 - **内容**: 学習過程の可視化データ
 - **形式**: TensorBoard 互換ログ
 
-### 6. **実験結果** (`logs/experiment_results.json`)
+### 6. **軌跡データファイル** (`logs/csvs/trajectory_episode_XXXX.csv`)
+
+- **ファイル名**: `trajectory_episode_XXXX.csv`
+- **内容**: 各エピソードの詳細な軌跡データ
+- **データ**:
+  - `episode`: エピソード番号
+  - `global_step`: エピソード内のグローバルステップ番号
+  - `step`: 各 trajectory 内のステップ番号
+  - `s_*`: 状態変数（座標、衝突フラグ、ステップ数など）
+  - `a_*`: 行動変数（移動方向、群制御モードなど）
+  - `reward`: 各ステップの報酬
+  - `done`: エピソード終了フラグ
+
+### 7. **実験結果** (`logs/experiment_results.json`)
 
 - **内容**: 実験全体のサマリー
 - **データ**: 全エピソードの結果、統計情報

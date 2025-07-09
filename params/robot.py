@@ -34,7 +34,7 @@ class Offset:
     collision_flag        : bool      = False
     boids_flag            : BoidsType = BoidsType.NONE
     estimated_probability : float     = 0.0
-    one_explore_step      : int       = 60
+    one_explore_step      : int       = 40
 
 
 class RobotParam:
@@ -91,7 +91,7 @@ class RobotParam:
             self.offset.collision_flag = offset_config.get("collision_flag", False)
             self.offset.boids_flag = BoidsType(offset_config.get("boids_flag", 0))
             self.offset.estimated_probability = offset_config.get("estimated_probability", 0.0)
-            self.offset.one_explore_step = offset_config.get("one_explore_step", 60)
+            self.offset.one_explore_step = offset_config.get("one_explore_step", 40)
     
     # Stateful interface implementation
     def get_state(self) -> Dict[str, Any]:

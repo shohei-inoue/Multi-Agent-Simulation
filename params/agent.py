@@ -53,7 +53,7 @@ class AgentParam(BaseModel):
         optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
-        episodeNum=50,
+        episodeNum=150,
         nStep=5,
     )
     
@@ -100,7 +100,7 @@ class AgentParam(BaseModel):
             optimizer="adam",
             gamma=0.99,
             learningLate=0.001,
-            episodeNum=50,
+            episodeNum=150,
             nStep=5,
         )
     

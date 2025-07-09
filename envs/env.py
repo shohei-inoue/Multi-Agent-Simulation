@@ -151,9 +151,9 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         self.collision_flag         = False
 
         # ----- dynamic leader-follower system -----
-        self.current_leader_index   = 0    # 現在のleaderのインデックス
-        self.leader_switch_interval = 10   # leader切り替え間隔（ステップ数）
-        self.leader_switch_counter  = 0    # leader切り替えカウンター
+        self.current_leader_index   = 0    # 現在のleaderのインデックス（固定）
+        self.leader_switch_interval = 10   # leader切り替え間隔（ステップ数）- 現在は使用しない
+        self.leader_switch_counter  = 0    # leader切り替えカウンター（現在は使用しない）
         
         # ----- multi-swarm system -----
         self.swarms = []                    # 群のリスト
@@ -288,11 +288,11 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           role                  = RobotRole.LEADER if index == 0 else RobotRole.FOLLOWER
         ) for index in range(self.__robot_num)]
         
-        # 初期leaderを設定
+        # 初期leaderを設定（固定）
         self.robots[0].set_role(RobotRole.LEADER)
         self.current_leader = self.robots[0]
         self.current_leader_index = 0
-        self.leader_switch_counter = 0
+        self.leader_switch_counter = 0  # 現在は使用しない
         
         # 初期群を作成
         initial_swarm = Swarm(
@@ -332,7 +332,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
 
     def _switch_leader(self):
         """
-        leaderを切り替える
+        leaderを切り替える（現在は使用されていない：群分岐時のみ新しいリーダーが増える）
         """
         # 現在のleaderをfollowerに変更
         self.current_leader.set_role(RobotRole.FOLLOWER)
@@ -617,7 +617,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                   marker='*',
                   edgecolors='black',
                   linewidth=1,
-                  label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})" if swarm_idx == 0 else None
+                  label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})"
               )
               
               # leaderの軌跡（リーダー固有のカラーで表示）
@@ -630,7 +630,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                       linewidth=1.5,
                       alpha=0.6,  # 適度な透明度
                       linestyle='-',
-                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})" if swarm_idx == 0 else None
+                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
               else:
                   # 従来の軌跡表示（フォールバック）
@@ -641,7 +641,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                       linewidth=1.5,
                       alpha=0.6,  # 適度な透明度
                       linestyle='-',
-                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})" if swarm_idx == 0 else None
+                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
               
               # leaderを中心とした探査領域の表示
@@ -709,7 +709,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
 
           # === フォロワによる衝突点の描画 ===
           for cx, cy in self.follower_collision_points:
-              ax.plot(cx, cy, 'rx', markersize=6, zorder=5)
+              ax.plot(cx, cy, 'rx', markersize=6, zorder=5, alpha=0.3)
 
           # 凡例の表示（重複を避ける）
           handles, labels = ax.get_legend_handles_labels()
@@ -722,12 +722,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           # matplotlibのバージョンに応じて適切なメソッドを使用
           try:
               # 新しいmatplotlibバージョン用
-              img_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+              img_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)  # type: ignore
               img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
           except (AttributeError, TypeError):
               try:
                   # 代替方法1: buffer_rgbaを使用
-                  img_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+                  img_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)  # type: ignore
                   img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
                   img_array = img_array[:, :, :3]  # アルファチャンネルを除去
               except (AttributeError, TypeError):
@@ -803,7 +803,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                   marker='*',
                   edgecolors='black',
                   linewidth=1,
-                  label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})" if swarm_idx == 0 else None
+                  label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})"
               )
               
               # leaderの軌跡（リーダー固有のカラーで表示）
@@ -816,7 +816,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                       linewidth=1.5,
                       alpha=0.6,  # 適度な透明度
                       linestyle='-',
-                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})" if swarm_idx == 0 else None
+                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
               else:
                   # 従来の軌跡表示（フォールバック）
@@ -827,7 +827,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                       linewidth=1.5,
                       alpha=0.6,  # 適度な透明度
                       linestyle='-',
-                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})" if swarm_idx == 0 else None
+                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
               
               # leaderを中心とした探査領域の表示
@@ -898,7 +898,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
 
           # === フォロワによる衝突点の描画 ===
           for cx, cy in self.follower_collision_points:
-              ax.plot(cx, cy, 'rx', markersize=6, zorder=5)
+              ax.plot(cx, cy, 'rx', markersize=6, zorder=5, alpha=0.3)
 
           # 凡例の表示（重複を避ける）
           handles, labels = ax.get_legend_handles_labels()
@@ -922,12 +922,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         mode = action.get('mode', 0)
         self._handle_swarm_mode(mode)
         
-        # leader切り替えチェック（通常時のみ）
-        if mode == 0:
-            self.leader_switch_counter += 1
-            if self.leader_switch_counter >= self.leader_switch_interval:
-                self._switch_leader()
-                self.leader_switch_counter = 0
+        # leader切り替えチェック（無効化：群分岐時のみ新しいリーダーが増える）
+        # if mode == 0:
+        #     self.leader_switch_counter += 1
+        #     if self.leader_switch_counter >= self.leader_switch_interval:
+        #         self._switch_leader()
+        #         self.leader_switch_counter = 0
 
         # 各群のleaderの行動を実行
         leader_rewards = {}  # 各リーダーの報酬を個別に管理
@@ -1307,12 +1307,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
             try:
                 import tensorflow as tf
                 # TensorFlow 2.x
-                optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+                optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)  # type: ignore
             except (AttributeError, ImportError):
                 try:
                     import tensorflow as tf
                     # TensorFlow 1.x
-                    optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
+                    optimizer = tf.train.AdamOptimizer(learning_rate=0.001)  # type: ignore
                 except (AttributeError, ImportError):
                     # Fallback: 基本的なオプティマイザー
                     print("Warning: Using fallback optimizer")

@@ -114,7 +114,7 @@ class A2CAgent(BaseAgent):
     if csv_path:
         self.save_trajectory_to_csv(csv_path, episode=episode, step_logs=step_logs)
 
-    return states, actions, rewards, dones, next_states, state
+    return states, actions, rewards, dones, next_states, state, step_logs
   
 
   def compute_returns_and_advantages(self, states, rewards, dones, next_states):
@@ -149,9 +149,10 @@ class A2CAgent(BaseAgent):
     total_reward = 0
     done = False
     step_count = 0
+    episode_step_logs = []  # エピソード全体のログを収集
 
     while not done and step_count < self.max_steps_per_episode:
-      states, actions, rewards, dones, next_states, next_state = self.collect_trajectory(state, episode=episode, csv_path=log_dir)
+      states, actions, rewards, dones, next_states, next_state, step_logs = self.collect_trajectory(state, episode=episode, csv_path=None)  # CSV保存は後で行う
       returns, advantages = self.compute_returns_and_advantages(states, rewards, dones, next_states)
 
       self.model.train_step(
@@ -162,6 +163,9 @@ class A2CAgent(BaseAgent):
         tf.convert_to_tensor(advantages, dtype=tf.float32),
       )
 
+      # エピソード全体のログに追加
+      episode_step_logs.extend(step_logs)
+
       total_reward += sum(rewards)
       done = dones[-1]
       state = next_state if not done else self.env.reset()
@@ -169,6 +173,10 @@ class A2CAgent(BaseAgent):
     
     # エピソードごとのステップ数を記録
     self.step_count = step_count
+    
+    # エピソード全体の軌跡CSVを保存
+    if log_dir:
+        self.save_episode_trajectory_csv(log_dir, episode, episode_step_logs)
     
     # 終了後にログ出力
     self.save_gif(log_dir, episode)  # GIF保存は有効
@@ -306,8 +314,40 @@ class A2CAgent(BaseAgent):
     df.insert(0, "episode", episode)
     csv_dir = os.path.join(csv_path, "csvs")
     os.makedirs(csv_dir, exist_ok=True)
-    file_path = os.path.join(csv_path, f"trajectory_episode_{episode:04d}.csv")
+    file_path = os.path.join(csv_dir, f"trajectory_episode_{episode:04d}.csv")
     df.to_csv(file_path, index=False)
+    print(f"Trajectory CSV saved to: {file_path}")
+
+
+  def save_episode_trajectory_csv(
+    self,
+    log_dir: str,
+    episode: int,
+    step_logs: List[Dict[str, Any]]
+):
+    """
+    エピソード全体の軌跡ログをCSVに保存する
+
+    Parameters:
+    - log_dir: 保存先ディレクトリ
+    - episode: エピソード番号
+    - step_logs: エピソード全体の各ステップの状態・行動・報酬などのリスト
+    """
+    if not step_logs:
+        print(f"No trajectory data for episode {episode}")
+        return
+    
+    df = pd.DataFrame(step_logs)
+    df.insert(0, "episode", episode)
+    
+    # グローバルステップ番号を追加
+    df["global_step"] = list(range(len(df)))
+    
+    csv_dir = os.path.join(log_dir, "csvs")
+    os.makedirs(csv_dir, exist_ok=True)
+    file_path = os.path.join(csv_dir, f"trajectory_episode_{episode:04d}.csv")
+    df.to_csv(file_path, index=False)
+    print(f"Episode trajectory CSV saved to: {file_path}")
   
 
   # ----- データ保存用関数 -----
