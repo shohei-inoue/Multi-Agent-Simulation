@@ -11,6 +11,7 @@ matplotlib.use('Agg')  # 非インタラクティブバックエンドを使用
 import matplotlib.pyplot as plt
 from PIL import Image
 import io
+from datetime import datetime
 
 class A2CAgent(BaseAgent):
   def __init__(
@@ -314,8 +315,71 @@ class A2CAgent(BaseAgent):
     metrics_dir = os.path.join(log_dir, "metrics")
     os.makedirs(metrics_dir, exist_ok=True)
     metrics_path = os.path.join(metrics_dir, f"episode_{episode:04d}.json")
+    
+    # 環境から詳細なmetricsを取得
+    env_metrics = {}
+    if hasattr(self.env, 'scorer'):
+        scorer = self.env.scorer
+        env_metrics = {
+            "final_exploration_rate": scorer.exploration_rate[-1] if scorer.exploration_rate else 0.0,
+            "max_exploration_rate": max(scorer.exploration_rate) if scorer.exploration_rate else 0.0,
+            "total_steps": len(scorer.exploration_rate),
+            "goal_reaching_step": scorer.goal_reaching_step,
+            "agent_collision_count": scorer.agent_collision_count,
+            "follower_collision_count": scorer.follower_collision_count,
+            "total_distance_traveled": scorer.total_distance_traveled,
+            "revisit_ratio": scorer.revisit_ratio,
+            "revisit_count": scorer.revisit_count
+        }
+    
+    # 環境の状態情報を取得
+    env_state = {}
+    if hasattr(self.env, 'exploration_ratio'):
+        env_state["exploration_ratio"] = self.env.exploration_ratio
+    if hasattr(self.env, 'explored_area'):
+        env_state["explored_area"] = self.env.explored_area
+    if hasattr(self.env, 'total_area'):
+        env_state["total_area"] = self.env.total_area
+    if hasattr(self.env, 'agent_step'):
+        env_state["agent_step"] = self.env.agent_step
+    
+    # 群の情報を取得
+    swarm_info = {}
+    if hasattr(self.env, 'swarms'):
+        swarm_info = {
+            "swarm_count": len(self.env.swarms),
+            "swarm_details": []
+        }
+        for swarm in self.env.swarms:
+            swarm_detail = {
+                "swarm_id": swarm.swarm_id,
+                "leader_id": swarm.leader.id,
+                "follower_count": len(swarm.followers),
+                "total_robots": swarm.get_robot_count(),
+                "exploration_rate": swarm.exploration_rate,
+                "step_count": swarm.step_count
+            }
+            swarm_info["swarm_details"].append(swarm_detail)
+    
+    # 学習関連の情報
+    learning_info = {
+        "step_count": getattr(self, 'step_count', 0),
+        "model_updated": True  # A2Cでは毎エピソード更新
+    }
+    
+    # 総合metrics
+    metrics = {
+        "episode": episode,
+        "total_reward": reward,
+        "environment_metrics": env_metrics,
+        "environment_state": env_state,
+        "swarm_information": swarm_info,
+        "learning_info": learning_info,
+        "timestamp": datetime.now().isoformat()
+    }
+    
     with open(metrics_path, "w") as f:
-        json.dump({"episode": episode, "total_reward": reward}, f, indent=2)
+        json.dump(metrics, f, indent=2, default=str)
 
 
   def save_model(self, log_dir, episode):
@@ -329,7 +393,39 @@ class A2CAgent(BaseAgent):
     tb_dir = os.path.join(log_dir, "tensorboard")
     writer = tf.summary.create_file_writer(tb_dir)
     with writer.as_default():
+        # 基本情報
         tf.summary.scalar("Total Reward", reward, step=episode)
+        
+        # 環境の詳細情報
+        if hasattr(self.env, 'scorer'):
+            scorer = self.env.scorer
+            tf.summary.scalar("Final Exploration Rate", scorer.exploration_rate[-1] if scorer.exploration_rate else 0.0, step=episode)
+            tf.summary.scalar("Max Exploration Rate", max(scorer.exploration_rate) if scorer.exploration_rate else 0.0, step=episode)
+            tf.summary.scalar("Total Steps", len(scorer.exploration_rate), step=episode)
+            tf.summary.scalar("Agent Collision Count", scorer.agent_collision_count, step=episode)
+            tf.summary.scalar("Follower Collision Count", scorer.follower_collision_count, step=episode)
+            tf.summary.scalar("Total Distance Traveled", scorer.total_distance_traveled, step=episode)
+            tf.summary.scalar("Revisit Ratio", scorer.revisit_ratio, step=episode)
+        
+        # 環境状態
+        if hasattr(self.env, 'exploration_ratio'):
+            tf.summary.scalar("Current Exploration Ratio", self.env.exploration_ratio, step=episode)
+        if hasattr(self.env, 'explored_area'):
+            tf.summary.scalar("Explored Area", self.env.explored_area, step=episode)
+        if hasattr(self.env, 'total_area'):
+            tf.summary.scalar("Total Area", self.env.total_area, step=episode)
+        
+        # 群の情報
+        if hasattr(self.env, 'swarms'):
+            tf.summary.scalar("Swarm Count", len(self.env.swarms), step=episode)
+            for i, swarm in enumerate(self.env.swarms):
+                tf.summary.scalar(f"Swarm_{i}_Follower_Count", len(swarm.followers), step=episode)
+                tf.summary.scalar(f"Swarm_{i}_Total_Robots", swarm.get_robot_count(), step=episode)
+                tf.summary.scalar(f"Swarm_{i}_Exploration_Rate", swarm.exploration_rate, step=episode)
+        
+        # 学習情報
+        tf.summary.scalar("Episode Steps", getattr(self, 'step_count', 0), step=episode)
+        
         writer.flush()
   
 

@@ -17,6 +17,7 @@ import pandas as pd
 from datetime import datetime
 import threading
 import time
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, Any, Tuple, List, Optional
 
@@ -25,7 +26,7 @@ from .action_space import create_action_space
 from .observation_space import create_observation_space, create_initial_state
 from .reward import create_reward
 from robots.red import Red, BoidsType, RobotRole
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from params.simulation import Param
 from params.robot_logging import RobotLoggingConfig
 from scores.score import Score
@@ -1335,4 +1336,113 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
             print(f"Created new leader agent for leader {leader_id}")
         
         return self.leader_agents[leader_id]
+  
+
+    def save_initial_state(self, log_dir):
+        """
+        初期状態をJSONで保存する
+        """
+        # 基本情報
+        initial_state_dict = {
+            'timestamp': datetime.now().isoformat(),
+            'simulation_info': {
+                'map_width': self.__map_width,
+                'map_height': self.__map_height,
+                'map_seed': self.__map_seed,
+                'obstacle_probability': self.__obstacle_probability,
+                'obstacle_max_size': self.__obstacle_max_size,
+                'obstacle_value': self.__obstacle_value,
+                'robot_num': self.__robot_num,
+                'finish_rate': self.__finish_rate,
+                'finish_step': self.__finish_step
+            },
+            'robot_config': {
+                'movement_min': self.__movement_min,
+                'movement_max': self.__movement_max,
+                'boids_min': self.__boids_min,
+                'boids_max': self.__boids_max,
+                'avoidance_min': self.__avoidance_min,
+                'avoidance_max': self.__avoidance_max,
+                'offset_position': self.__offset.position,
+                'offset_step': self.__offset.step,
+                'offset_amount_of_movement': self.__offset.amount_of_movement,
+                'offset_direction_angle': self.__offset.direction_angle,
+                'offset_collision_flag': self.__offset.collision_flag,
+                'offset_boids_flag': self.__offset.boids_flag.value,
+                'offset_estimated_probability': self.__offset.estimated_probability
+            },
+            'exploration_config': {
+                'boundary_inner': self.__boundary_inner,
+                'boundary_outer': self.__boundary_outer,
+                'mv_mean': self.__mv_mean,
+                'mv_variance': self.__mv_variance,
+                'initial_coordinate_x': self.__initial_coordinate_x,
+                'initial_coordinate_y': self.__initial_coordinate_y,
+                'exploration_radius': self.exploration_radius
+            },
+            'swarm_config': {
+                'leader_switch_interval': self.leader_switch_interval,
+                'initial_swarm_id': self.initial_swarm_id,
+                'swarm_count': len(self.swarms)
+            },
+            'initial_state': {
+                'explored_area': self.explored_area,
+                'exploration_ratio': self.exploration_ratio,
+                'agent_step': self.agent_step,
+                'collision_flag': self.collision_flag,
+                'total_area': self.total_area,
+                'MAX_COLLISION_NUM': self.MAX_COLLISION_NUM
+            },
+            'robots_info': []
+        }
+        
+        # 各ロボットの初期情報を保存
+        for i, robot in enumerate(self.robots):
+            robot_info = {
+                'robot_id': robot.id,
+                'initial_position': {
+                    'x': robot.x,
+                    'y': robot.y
+                },
+                'role': robot.role.value,
+                'swarm_id': robot.swarm_id,
+                'motion_params': {
+                    'step': robot.step,
+                    'amount_of_movement': robot.amount_of_movement,
+                    'direction_angle': robot.direction_angle
+                }
+            }
+            initial_state_dict['robots_info'].append(robot_info)
+        
+        # 群の初期情報を保存
+        initial_state_dict['swarms_info'] = []
+        for swarm in self.swarms:
+            swarm_info = {
+                'swarm_id': swarm.swarm_id,
+                'leader_id': swarm.leader.id,
+                'follower_ids': [follower.id for follower in swarm.followers],
+                'robot_count': swarm.get_robot_count(),
+                'exploration_rate': swarm.exploration_rate,
+                'step_count': swarm.step_count
+            }
+            initial_state_dict['swarms_info'].append(swarm_info)
+        
+        # 報酬設定を保存
+        initial_state_dict['reward_config'] = self.__reward_dict
+        
+        # 状態空間の情報を保存
+        initial_state_dict['state_space_info'] = {
+            'state_keys': list(self.state.keys()),
+            'state_dimensions': {key: len(value) if hasattr(value, '__len__') else 1 
+                               for key, value in self.state.items()}
+        }
+        
+        # ファイルに保存
+        initial_state_file = os.path.join(log_dir, 'initial_state.json')
+        with open(initial_state_file, 'w', encoding='utf-8') as f:
+            json.dump(initial_state_dict, f, indent=2, ensure_ascii=False, default=str)
+        
+        print(f"Initial state saved to {initial_state_file}")
+        
+        return initial_state_file
   

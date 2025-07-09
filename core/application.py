@@ -148,6 +148,14 @@ class Application:
         else:
             log_dir = "logs"
 
+        # エピソード0の場合のみ初期値を保存
+        if episode == 0:
+            try:
+                self.environment.save_initial_state(log_dir)
+            except Exception as e:
+                self.component_logger.log_component_event("initial_state_save_failed", {"error": str(e)})
+                print(f"Warning: Failed to save initial state: {e}")
+
         # A2CAgentのtrain_one_episodeを呼び出し、保存処理を一元化
         if hasattr(self.agent, "train_one_episode"):
             total_reward = self.agent.train_one_episode(episode=episode, log_dir=log_dir)
