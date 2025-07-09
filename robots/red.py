@@ -165,58 +165,146 @@ class Red():
 
   def calculate_mobility_metrics(self) -> dict:
     """
-    followerの動きやすさ指標を計算
+    ロボット内部情報に基づく動きやすさ指標を計算
     """
-    # 衝突密度の計算（近傍の障害物密度）
-    collision_density = 0.0
-    space_availability = 0.0
+    # 1. 衝突回避能力（衝突回数ベース）
+    collision_avoidance = self._calculate_collision_avoidance()
     
-    # 8方向の空間利用可能性をチェック
-    directions = [
-        (0, 1), (1, 1), (1, 0), (1, -1),
-        (0, -1), (-1, -1), (-1, 0), (-1, 1)
-    ]
+    # 2. 移動効率（移動量ベース）
+    movement_efficiency = self._calculate_movement_efficiency()
     
-    available_directions = 0
-    total_directions = len(directions)
+    # 3. 群協調性（leaderとの距離変化ベース）
+    swarm_coordination = self._calculate_swarm_coordination()
     
-    for dy, dx in directions:
-        check_y = int(self.y + dy)
-        check_x = int(self.x + dx)
-        
-        # マップ内かチェック
-        if (0 <= check_y < self.__map_height and 
-            0 <= check_x < self.__map_width):
-            
-            # 障害物でない場合
-            if self.__map[check_y, check_x] != self.__obstacle_value:
-                available_directions += 1
-            else:
-                collision_density += 1.0 / total_directions
+    # 4. 探査貢献度（新規探査領域ベース）
+    exploration_contribution = self._calculate_exploration_contribution()
     
-    # 空間利用可能性（0-1の値）
-    space_availability = available_directions / total_directions
-    
-    # 動きやすさスコアの計算
-    # 空間利用可能性が高く、衝突密度が低いほど高いスコア
-    mobility_score = space_availability * (1.0 - collision_density)
-    
-    # 距離による重み付け（leaderから遠いほど動きにくい）
-    distance_weight = max(0.1, 1.0 - (self.distance / self.__boundary_outer))
-    mobility_score *= distance_weight
+    # 統合計算
+    mobility_score = (
+        0.3 * collision_avoidance +      # 衝突回避（30%）
+        0.3 * movement_efficiency +      # 移動効率（30%）
+        0.2 * swarm_coordination +       # 群協調性（20%）
+        0.2 * exploration_contribution   # 探査貢献度（20%）
+    )
     
     # 値を更新
-    self.mobility_score = mobility_score
-    self.collision_density = collision_density
-    self.space_availability = space_availability
+    self.mobility_score = max(0.0, min(1.0, mobility_score))
     
     return {
-        'mobility_score': mobility_score,
-        'collision_density': collision_density,
-        'space_availability': space_availability,
-        'distance_weight': distance_weight
+        'mobility_score': self.mobility_score,
+        'collision_avoidance': collision_avoidance,
+        'movement_efficiency': movement_efficiency,
+        'swarm_coordination': swarm_coordination,
+        'exploration_contribution': exploration_contribution
     }
-  
+
+  def _calculate_collision_avoidance(self) -> float:
+    """
+    衝突回避能力を計算（衝突回数ベース）
+    """
+    # 最近のステップ数で衝突回数をカウント
+    recent_steps = min(20, len(self._data_buffer))  # 最近20ステップ
+    
+    if recent_steps == 0:
+        return 1.0  # データがない場合は最高評価
+    
+    # 最近の衝突回数をカウント
+    collision_count = 0
+    for step_data in self._data_buffer[-recent_steps:]:
+        if step_data[8]:  # collision_flag
+            collision_count += 1
+    
+    # 衝突回避能力 = 1 - (衝突回数 / ステップ数)
+    collision_rate = collision_count / recent_steps
+    collision_avoidance = max(0.0, 1.0 - collision_rate)
+    
+    return collision_avoidance
+
+  def _calculate_movement_efficiency(self) -> float:
+    """
+    移動効率を計算（移動量ベース）
+    """
+    # 最近のステップ数で移動量を分析
+    recent_steps = min(20, len(self._data_buffer))
+    
+    if recent_steps < 2:
+        return 0.5  # データ不足の場合は中程度評価
+    
+    total_movement = 0.0
+    effective_movements = 0
+    
+    for i in range(1, recent_steps):
+        prev_data = self._data_buffer[-(i+1)]
+        curr_data = self._data_buffer[-i]
+        
+        # 移動量を計算
+        prev_pos = prev_data[3]  # coordinate
+        curr_pos = curr_data[3]  # coordinate
+        movement = np.linalg.norm(curr_pos - prev_pos)
+        
+        total_movement += movement
+        
+        # 有効な移動（一定以上の移動量）をカウント
+        if movement > 0.1:  # 最小移動量閾値
+            effective_movements += 1
+    
+    # 移動効率 = 有効移動率 × 平均移動量の正規化
+    effective_rate = effective_movements / (recent_steps - 1)
+    avg_movement = total_movement / (recent_steps - 1)
+    
+    # 移動量を0-1に正規化（最大移動量を1.0とする）
+    normalized_movement = min(1.0, avg_movement / 2.0)  # 2.0を最大移動量とする
+    
+    movement_efficiency = effective_rate * normalized_movement
+    
+    return movement_efficiency
+
+  def _calculate_swarm_coordination(self) -> float:
+    """
+    群協調性を計算（leaderとの距離変化ベース）
+    """
+    recent_steps = min(20, len(self._data_buffer))
+    
+    if recent_steps < 2:
+        return 0.5
+    
+    # leaderとの距離の変化を分析
+    distance_changes = []
+    optimal_distance = 5.0  # 理想的な群内距離
+    
+    for i in range(1, recent_steps):
+        prev_distance = self._data_buffer[-(i+1)][6]  # distance
+        curr_distance = self._data_buffer[-i][6]      # distance
+        
+        # 距離変化の方向性を評価
+        if abs(curr_distance - optimal_distance) < abs(prev_distance - optimal_distance):
+            # 理想距離に近づいている
+            distance_changes.append(1.0)
+        else:
+            # 理想距離から遠ざかっている
+            distance_changes.append(0.0)
+    
+    # 群協調性 = 理想距離への接近率
+    coordination_score = np.mean(distance_changes) if distance_changes else 0.5
+    
+    return coordination_score
+
+  def _calculate_exploration_contribution(self) -> float:
+    """
+    探査貢献度を計算（新規探査領域ベース）
+    """
+    # 移動量から推定（移動量が多いほど探査貢献度が高いと仮定）
+    recent_steps = min(10, len(self._data_buffer))
+    if recent_steps > 0:
+        total_movement = sum(
+            np.linalg.norm(self._data_buffer[-i][3] - self._data_buffer[-(i+1)][3])
+            for i in range(1, recent_steps)
+        )
+        exploration_rate = min(1.0, total_movement / 10.0)  # 正規化
+    else:
+        exploration_rate = 0.0
+    
+    return exploration_rate
 
   def get_csv(self, episode, data_time):
     """

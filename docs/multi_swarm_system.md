@@ -1,12 +1,78 @@
-# マルチエージェント群分岐・統合システム
+# マルチエージェント群分岐・統合システム（最新版）
 
 ## 概要
 
-群ロボットシミュレーションにおいて、フォロワーの動きやすさ指標（Mobility Score）に基づいて群の構造が動的に変化するシステムを実装しました。学習可能な閾値により分岐・統合の判断を最適化し、効率的な探査を実現します。
+本システムは、各 follower が内部情報（衝突回数・移動量・協調性・探査貢献度）から算出した**動きやすさ指標（mobility_score）**を用い、VFH+Fuzzy アルゴリズムによる方向候補の多様性と組み合わせて、群の分岐・統合を動的に制御します。
 
-- **mode 0**: 通常動作（単一群）
-- **mode 1**: 群分岐（新しい leader を作成し、群を分割）
-- **mode 2**: 群統合（他の群に統合）
+- **分岐条件**：
+  - follower が 3 台以上
+  - VFH+Fuzzy の有効な移動方向 bin が 2 つ以上
+  - follower の mobility_score 平均が「学習可能な分岐閾値（branch_threshold）」以上
+    → すべて満たした場合のみ分岐
+- **統合条件**：
+
+  - follower の mobility_score 平均が「学習可能な統合閾値（merge_threshold）」を超えた場合
+
+- **分岐時の新リーダー方向選択**：
+  - 元リーダーが選択した方向（θ₀）以外の方向を、VFH+Fuzzy の確率密度（result_histogram）に従って確率的にサンプリング
+
+## 動きやすさ指標（mobility_score）の計算
+
+各 follower は、以下の内部情報から自分の mobility_score を計算します：
+
+- 衝突回避能力（最近 20 ステップの衝突回数が少ないほど高評価）
+- 移動効率（有効な移動割合と平均移動量）
+- 群協調性（leader との理想距離への接近度）
+- 探査貢献度（移動量から推定）
+
+mobility_score = 0.3 _ 衝突回避 + 0.3 _ 移動効率 + 0.2 _ 群協調性 + 0.2 _ 探査貢献度
+
+## 分岐・統合判定の流れ
+
+1. 各 follower が mobility_score を計算
+2. エージェント（policy）が全 follower の mobility_score 平均（avg_mobility）を算出
+3. VFH+Fuzzy の result_histogram から有効な方向 bin 数（平均以上の bin 数）を算出
+4. 以下の条件で mode を決定：
+   - 分岐（mode=1）：follower 数>=3 かつ 有効 bin 数>=2 かつ avg_mobility>=branch_threshold
+   - 統合（mode=2）：avg_mobility>merge_threshold
+   - それ以外は通常動作（mode=0）
+
+## 分岐時の新リーダー方向選択
+
+- 分岐時、元リーダーが選択した方向（θ₀）の bin を除外し、
+  VFH+Fuzzy の result_histogram から残りの bin を確率密度でサンプリング
+- 新リーダーはこの確率的に選ばれた方向で行動を開始
+
+## パラメータ
+
+- branch_threshold, merge_threshold は強化学習や最適化で自動調整可能
+- デフォルト値は 0.3（分岐）、0.7（統合）だが、sampled_params で外部から与えられる
+
+## 参考：policy の判定ロジック（擬似コード）
+
+```python
+mobility_scores = state.get('follower_mobility_scores', [])
+avg_mobility = np.mean(mobility_scores)
+
+# 有効な移動方向bin数
+mean_score = np.mean(result_histogram)
+valid_bins = [i for i, v in enumerate(result_histogram) if v >= mean_score and v > 0.0]
+valid_bin_count = len(valid_bins)
+
+if follower_count >= 3 and valid_bin_count >= 2 and avg_mobility >= branch_threshold:
+    mode = 1  # 分岐
+elif avg_mobility > merge_threshold:
+    mode = 2  # 統合
+else:
+    mode = 0  # 通常
+```
+
+## まとめ
+
+- 分岐・統合の判定はすべてエージェント（policy）側で行う
+- 各 follower の mobility_score は内部情報のみで計算
+- 分岐時の新リーダー方向は VFH+Fuzzy の確率密度に従い確率的に決定
+- 閾値は学習・最適化で自動調整可能
 
 ## システム構成
 

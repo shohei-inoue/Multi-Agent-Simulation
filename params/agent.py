@@ -45,7 +45,7 @@ class LearningParameter(BaseModel):
 
 class AgentParam(BaseModel):
     algorithm:                     Literal["vfh_fuzzy"] = "vfh_fuzzy"
-    maxStepsPerEpisode:            int = 40
+    maxStepsPerEpisode:            int = 50
     isLearning:                    bool = True
     learningParameter:             Optional[LearningParameter] = LearningParameter(
         type="a2c",
@@ -53,8 +53,8 @@ class AgentParam(BaseModel):
         optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
-        episodeNum=150,
-        nStep=5,
+        episodeNum=200,
+        nStep=10,
     )
     
     # Configurable interface implementation
@@ -92,7 +92,7 @@ class AgentParam(BaseModel):
     def reset_state(self):
         """Reset to initial state"""
         self.algorithm = "vfh_fuzzy"
-        self.maxStepsPerEpisode = 40
+        self.maxStepsPerEpisode = 50
         self.isLearning = True
         self.learningParameter = LearningParameter(
             type="a2c",
@@ -100,7 +100,7 @@ class AgentParam(BaseModel):
             optimizer="adam",
             gamma=0.99,
             learningLate=0.001,
-            episodeNum=150,
+            episodeNum=200,
             nStep=5,
         )
     
