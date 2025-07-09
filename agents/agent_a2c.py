@@ -105,7 +105,7 @@ class A2CAgent(BaseAgent):
         next_states.append(flatten_state(next_state))
 
         if done:
-            state = self.env.reset()
+            # 環境をリセットせずに、doneフラグだけを返す
             break
         else:
             state = next_state
@@ -114,7 +114,7 @@ class A2CAgent(BaseAgent):
     if csv_path:
         self.save_trajectory_to_csv(csv_path, episode=episode, step_logs=step_logs)
 
-    return states, actions, rewards, dones, next_states, state, step_logs
+    return states, actions, rewards, dones, next_states, next_state, step_logs
   
 
   def compute_returns_and_advantages(self, states, rewards, dones, next_states):
@@ -168,7 +168,15 @@ class A2CAgent(BaseAgent):
 
       total_reward += sum(rewards)
       done = dones[-1]
-      state = next_state if not done else self.env.reset()
+      
+      # エピソード終了時にTensorBoardログを記録（環境がリセットされる前）
+      if done and log_dir:
+          self.log_tensorboard(log_dir, episode, total_reward)
+          # TensorBoardログ記録後に環境をリセット
+          state = self.env.reset()
+      else:
+          state = next_state
+      
       step_count += 1 # ステップ数更新
     
     # エピソードごとのステップ数を記録
@@ -182,7 +190,6 @@ class A2CAgent(BaseAgent):
     self.save_gif(log_dir, episode)  # GIF保存は有効
     self.save_metrics(log_dir, episode, total_reward)
     self.save_model(log_dir, episode)
-    self.log_tensorboard(log_dir, episode, total_reward)
     
     # リアルタイム描画を無効化
     # plt.ioff()
@@ -436,35 +443,69 @@ class A2CAgent(BaseAgent):
         # 基本情報
         tf.summary.scalar("Total Reward", reward, step=episode)
         
+        # デバッグ情報を追加
+        tf.summary.scalar("Episode Steps", getattr(self, 'step_count', 0), step=episode)
+        
         # 環境の詳細情報
         if hasattr(self.env, 'scorer'):
             scorer = self.env.scorer
-            tf.summary.scalar("Final Exploration Rate", scorer.exploration_rate[-1] if scorer.exploration_rate else 0.0, step=episode)
-            tf.summary.scalar("Max Exploration Rate", max(scorer.exploration_rate) if scorer.exploration_rate else 0.0, step=episode)
-            tf.summary.scalar("Total Steps", len(scorer.exploration_rate), step=episode)
+            # デバッグ情報を追加
+            tf.summary.scalar("Scorer Exploration Rate Length", len(scorer.exploration_rate) if scorer.exploration_rate else 0, step=episode)
+            
+            # 実際の値を取得
+            final_exploration_rate = scorer.exploration_rate[-1] if scorer.exploration_rate else 0.0
+            max_exploration_rate = max(scorer.exploration_rate) if scorer.exploration_rate else 0.0
+            total_steps = len(scorer.exploration_rate)
+            
+            tf.summary.scalar("Final Exploration Rate", final_exploration_rate, step=episode)
+            tf.summary.scalar("Max Exploration Rate", max_exploration_rate, step=episode)
+            tf.summary.scalar("Total Steps", total_steps, step=episode)
             tf.summary.scalar("Agent Collision Count", scorer.agent_collision_count, step=episode)
             tf.summary.scalar("Follower Collision Count", scorer.follower_collision_count, step=episode)
             tf.summary.scalar("Total Distance Traveled", scorer.total_distance_traveled, step=episode)
             tf.summary.scalar("Revisit Ratio", scorer.revisit_ratio, step=episode)
+            
+            # デバッグ用：実際の値を出力
+            print(f"Episode {episode} - Final Exploration Rate: {final_exploration_rate}, Max: {max_exploration_rate}, Steps: {total_steps}")
+            print(f"Episode {episode} - Agent Collisions: {scorer.agent_collision_count}, Follower Collisions: {scorer.follower_collision_count}")
+            print(f"Episode {episode} - Scorer ID: {id(scorer)}, Exploration Rate List Length: {len(scorer.exploration_rate)}")
+        else:
+            # スコアラーが存在しない場合のデバッグ情報
+            tf.summary.scalar("Scorer Exists", 0, step=episode)
+            print(f"Episode {episode} - No scorer found")
         
         # 環境状態
         if hasattr(self.env, 'exploration_ratio'):
-            tf.summary.scalar("Current Exploration Ratio", self.env.exploration_ratio, step=episode)
+            current_exploration_ratio = self.env.exploration_ratio
+            tf.summary.scalar("Current Exploration Ratio", current_exploration_ratio, step=episode)
+            print(f"Episode {episode} - Current Exploration Ratio: {current_exploration_ratio}")
+        else:
+            tf.summary.scalar("Exploration Ratio Exists", 0, step=episode)
+            
         if hasattr(self.env, 'explored_area'):
-            tf.summary.scalar("Explored Area", self.env.explored_area, step=episode)
+            explored_area = self.env.explored_area
+            tf.summary.scalar("Explored Area", explored_area, step=episode)
+            print(f"Episode {episode} - Explored Area: {explored_area}")
+        else:
+            tf.summary.scalar("Explored Area Exists", 0, step=episode)
+            
         if hasattr(self.env, 'total_area'):
-            tf.summary.scalar("Total Area", self.env.total_area, step=episode)
+            total_area = self.env.total_area
+            tf.summary.scalar("Total Area", total_area, step=episode)
+        else:
+            tf.summary.scalar("Total Area Exists", 0, step=episode)
         
         # 群の情報
         if hasattr(self.env, 'swarms'):
-            tf.summary.scalar("Swarm Count", len(self.env.swarms), step=episode)
+            swarm_count = len(self.env.swarms)
+            tf.summary.scalar("Swarm Count", swarm_count, step=episode)
+            print(f"Episode {episode} - Swarm Count: {swarm_count}")
             for i, swarm in enumerate(self.env.swarms):
                 tf.summary.scalar(f"Swarm_{i}_Follower_Count", len(swarm.followers), step=episode)
                 tf.summary.scalar(f"Swarm_{i}_Total_Robots", swarm.get_robot_count(), step=episode)
                 tf.summary.scalar(f"Swarm_{i}_Exploration_Rate", swarm.exploration_rate, step=episode)
-        
-        # 学習情報
-        tf.summary.scalar("Episode Steps", getattr(self, 'step_count', 0), step=episode)
+        else:
+            tf.summary.scalar("Swarms Exist", 0, step=episode)
         
         writer.flush()
   

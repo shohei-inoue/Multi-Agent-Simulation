@@ -235,7 +235,9 @@ class AlgorithmVfhFuzzy():
     - mode 0: 通常動作（単一群）
     - mode 1: 群分岐（新しいleaderを作成）
     - mode 2: 群統合（他の群に統合）
-    followerのmobility_scoreと学習パラメータの閾値で判定
+    分岐条件：
+      ・有効な移動方向binが2つ以上
+      ・followerのmobility_score平均がbranch_threshold以上
     """
     # sampled_params: [th, k_e, k_c, branch_threshold, merge_threshold]
     if len(sampled_params) >= 5:
@@ -251,11 +253,20 @@ class AlgorithmVfhFuzzy():
     
     # followerの数を確認（mobility_scoresの非ゼロ要素数）
     follower_count = sum(1 for score in mobility_scores if score > 0.0)
-    
     avg_mobility = np.mean(mobility_scores)
 
-    # 分岐判定（followerが3台以上の場合のみ）
-    if follower_count >= 3 and avg_mobility < branch_threshold:
+    # === 有効な移動方向bin数を計算 ===
+    # result_histogramはpolicy()で計算済み
+    if self.result_histogram is not None:
+        # 有効bin: スコアが全体平均以上のbin
+        mean_score = np.mean(self.result_histogram)
+        valid_bins = [i for i, v in enumerate(self.result_histogram) if v >= mean_score and v > 0.0]
+        valid_bin_count = len(valid_bins)
+    else:
+        valid_bin_count = 0
+
+    # 分岐判定（AND条件）
+    if follower_count >= 3 and valid_bin_count >= 2 and avg_mobility >= branch_threshold:
         return 1  # 群分岐
     # 統合判定
     if avg_mobility > merge_threshold:
