@@ -597,107 +597,85 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
               extent=(0, self.__map_width, 0, self.__map_height),
           )
 
-          # 各群のロボットを描画
-          colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
-          trajectory_colors = ['darkgreen', 'darkorange', 'darkred', 'darkblue', 'darkviolet', 'darkcyan', 'darkmagenta', 'darkgoldenrod', 'darkseagreen', 'darkslateblue']
-          
-          for swarm_idx, swarm in enumerate(self.swarms):
-              # リーダーIDに基づいてカラーを決定
-              leader_id = int(swarm.leader.id) if swarm.leader.id.isdigit() else hash(swarm.leader.id) % len(colors)
+          # === 追加: リーダー描画用の外部関数 ===
+          def render_leader(ax, swarm, colors, trajectory_colors, exploration_radius):
+              """
+              指定したswarmのリーダー・軌跡・探査円を描画する
+              """
+              leader_id = int(swarm.leader.id) if str(swarm.leader.id).isdigit() else hash(swarm.leader.id) % len(colors)
               leader_color = colors[leader_id % len(colors)]
               trajectory_color = trajectory_colors[leader_id % len(trajectory_colors)]
-              
-              # leaderの描画（探査中心として表示）
               leader = swarm.leader
+              # リーダーの位置
               ax.scatter(
                   x=leader.data['x'].iloc[-1],
                   y=leader.data['y'].iloc[-1],
-                  color=leader_color,  # リーダー固有のカラー
+                  color=leader_color,
                   s=25,
                   marker='*',
                   edgecolors='black',
                   linewidth=1,
                   label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})"
               )
-              
-              # leaderの軌跡（リーダー固有のカラーで表示）
+              # リーダーの軌跡
               if hasattr(leader, 'leader_trajectory_data') and len(leader.leader_trajectory_data) > 0:
-                  # リーダーになった時点からの軌跡を表示
                   ax.plot(
                       leader.leader_trajectory_data['x'],
                       leader.leader_trajectory_data['y'],
-                      color=trajectory_color,  # リーダー固有の軌跡カラー
+                      color=trajectory_color,
                       linewidth=1.5,
-                      alpha=0.6,  # 適度な透明度
+                      alpha=0.6,
                       linestyle='-',
                       label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
               else:
-                  # 従来の軌跡表示（フォールバック）
                   ax.plot(
                       leader.data['x'],
                       leader.data['y'],
-                      color=trajectory_color,  # リーダー固有の軌跡カラー
+                      color=trajectory_color,
                       linewidth=1.5,
-                      alpha=0.6,  # 適度な透明度
+                      alpha=0.6,
                       linestyle='-',
                       label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
-              
-              # leaderを中心とした探査領域の表示
+              # 探査円
               if len(leader.data['x']) > 0:
                   current_x = leader.data['x'].iloc[-1]
                   current_y = leader.data['y'].iloc[-1]
-                  
-                  # 探査領域の円を描画
-                  circle = Circle(
-                      (current_x, current_y), 
-                      self.exploration_radius, 
-                      color='blue', 
-                      alpha=0.1, 
-                      fill=True,
-                      linestyle='--',
-                      linewidth=1
-                  )
+                  circle = Circle((current_x, current_y), exploration_radius, color='blue', alpha=0.1, fill=True, linestyle='--', linewidth=1)
                   ax.add_patch(circle)
-                  
-                  # 探査領域の境界線
-                  circle_boundary = Circle(
-                      (current_x, current_y), 
-                      self.exploration_radius, 
-                      color='blue', 
-                      alpha=0.3, 
-                      fill=False,
-                      linestyle='--',
-                      linewidth=1.5
-                  )
+                  circle_boundary = Circle((current_x, current_y), exploration_radius, color='blue', alpha=0.3, fill=False, linestyle='--', linewidth=1.5)
                   ax.add_patch(circle_boundary)
-              
-              # followerの描画
+
+          # --- 各群のロボットを描画 ---
+          colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
+          trajectory_colors = ['darkgreen', 'darkorange', 'darkred', 'darkblue', 'darkviolet', 'darkcyan', 'darkmagenta', 'darkgoldenrod', 'darkseagreen', 'darkslateblue']
+          for swarm_idx, swarm in enumerate(self.swarms):
+              # --- リーダー描画を外部関数で ---
+              render_leader(ax, swarm, colors, trajectory_colors, self.exploration_radius)
+              # followerの描画（従来通り）
               for i, follower in enumerate(swarm.followers):
-                if follower.role == RobotRole.FOLLOWER:
-                  fx = follower.data['x'].iloc[-1]
-                  fy = follower.data['y'].iloc[-1]
-                  ax.scatter(
-                      x=fx,
-                      y=fy,
-                      color=leader_color,  # リーダーと同じカラーを使用
-                      s=10,
-                      marker='o',
-                      alpha=0.7,
-                      label=f"Follower (Leader ID: {leader.id})" if i == 0 and swarm_idx == 0 else None
-                  )
-                  
-                  # followerの軌跡（薄いカラーで表示）
-                  if len(follower.data) > 1:
-                      ax.plot(
-                          follower.data['x'],
-                          follower.data['y'],
-                          color=trajectory_color,  # リーダーと同じ軌跡カラー
-                          linewidth=0.5,
-                          alpha=0.3,  # より薄い透明度
-                          linestyle='-'
+                  if follower.role == RobotRole.FOLLOWER:
+                      fx = follower.data['x'].iloc[-1]
+                      fy = follower.data['y'].iloc[-1]
+                      ax.scatter(
+                          x=fx,
+                          y=fy,
+                          color=colors[swarm_idx % len(colors)],
+                          s=10,
+                          marker='o',
+                          alpha=0.7,
+                          label=f"Follower (Leader ID: {swarm.leader.id})" if i == 0 and swarm_idx == 0 else None
                       )
+                      if len(follower.data) > 1:
+                          ax.plot(
+                              follower.data['x'],
+                              follower.data['y'],
+                              color=trajectory_colors[swarm_idx % len(trajectory_colors)],
+                              linewidth=0.5,
+                              alpha=0.3,
+                              linestyle='-'
+                          )
 
           # 軸の調整
           ax.set_xlim(0, self.__map_width)
@@ -781,109 +759,85 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
               extent=(0, self.__map_width, 0, self.__map_height),
           )
 
-
-
-          # 各群のロボットを描画
-          colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
-          trajectory_colors = ['darkgreen', 'darkorange', 'darkred', 'darkblue', 'darkviolet', 'darkcyan', 'darkmagenta', 'darkgoldenrod', 'darkseagreen', 'darkslateblue']
-          
-          for swarm_idx, swarm in enumerate(self.swarms):
-              # リーダーIDに基づいてカラーを決定
-              leader_id = int(swarm.leader.id) if swarm.leader.id.isdigit() else hash(swarm.leader.id) % len(colors)
+          # === 追加: リーダー描画用の外部関数 ===
+          def render_leader(ax, swarm, colors, trajectory_colors, exploration_radius):
+              """
+              指定したswarmのリーダー・軌跡・探査円を描画する
+              """
+              leader_id = int(swarm.leader.id) if str(swarm.leader.id).isdigit() else hash(swarm.leader.id) % len(colors)
               leader_color = colors[leader_id % len(colors)]
               trajectory_color = trajectory_colors[leader_id % len(trajectory_colors)]
-              
-              # leaderの描画（探査中心として表示）
               leader = swarm.leader
+              # リーダーの位置
               ax.scatter(
                   x=leader.data['x'].iloc[-1],
                   y=leader.data['y'].iloc[-1],
-                  color=leader_color,  # リーダー固有のカラー
+                  color=leader_color,
                   s=25,
                   marker='*',
                   edgecolors='black',
                   linewidth=1,
                   label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})"
               )
-              
-              # leaderの軌跡（リーダー固有のカラーで表示）
+              # リーダーの軌跡
               if hasattr(leader, 'leader_trajectory_data') and len(leader.leader_trajectory_data) > 0:
-                  # リーダーになった時点からの軌跡を表示
                   ax.plot(
                       leader.leader_trajectory_data['x'],
                       leader.leader_trajectory_data['y'],
-                      color=trajectory_color,  # リーダー固有の軌跡カラー
+                      color=trajectory_color,
                       linewidth=1.5,
-                      alpha=0.6,  # 適度な透明度
+                      alpha=0.6,
                       linestyle='-',
                       label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
               else:
-                  # 従来の軌跡表示（フォールバック）
                   ax.plot(
                       leader.data['x'],
                       leader.data['y'],
-                      color=trajectory_color,  # リーダー固有の軌跡カラー
+                      color=trajectory_color,
                       linewidth=1.5,
-                      alpha=0.6,  # 適度な透明度
+                      alpha=0.6,
                       linestyle='-',
                       label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
                   )
-              
-              # leaderを中心とした探査領域の表示
+              # 探査円
               if len(leader.data['x']) > 0:
                   current_x = leader.data['x'].iloc[-1]
                   current_y = leader.data['y'].iloc[-1]
-                  
-                  # 探査領域の円を描画
-                  circle = Circle(
-                      (current_x, current_y), 
-                      self.exploration_radius, 
-                      color='blue', 
-                      alpha=0.1, 
-                      fill=True,
-                      linestyle='--',
-                      linewidth=1
-                  )
+                  circle = Circle((current_x, current_y), exploration_radius, color='blue', alpha=0.1, fill=True, linestyle='--', linewidth=1)
                   ax.add_patch(circle)
-                  
-                  # 探査領域の境界線
-                  circle_boundary = Circle(
-                      (current_x, current_y), 
-                      self.exploration_radius, 
-                      color='blue', 
-                      alpha=0.3, 
-                      fill=False,
-                      linestyle='--',
-                      linewidth=1.5
-                  )
+                  circle_boundary = Circle((current_x, current_y), exploration_radius, color='blue', alpha=0.3, fill=False, linestyle='--', linewidth=1.5)
                   ax.add_patch(circle_boundary)
-              
-              # followerの描画
+
+          # --- 各群のロボットを描画 ---
+          colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
+          trajectory_colors = ['darkgreen', 'darkorange', 'darkred', 'darkblue', 'darkviolet', 'darkcyan', 'darkmagenta', 'darkgoldenrod', 'darkseagreen', 'darkslateblue']
+          for swarm_idx, swarm in enumerate(self.swarms):
+              # --- リーダー描画を外部関数で ---
+              render_leader(ax, swarm, colors, trajectory_colors, self.exploration_radius)
+              # followerの描画（従来通り）
               for i, follower in enumerate(swarm.followers):
-                if follower.role == RobotRole.FOLLOWER:
-                  fx = follower.data['x'].iloc[-1]
-                  fy = follower.data['y'].iloc[-1]
-                  ax.scatter(
-                      x=fx,
-                      y=fy,
-                      color=leader_color,  # リーダーと同じカラーを使用
-                      s=10,
-                      marker='o',
-                      alpha=0.7,
-                      label=f"Follower (Leader ID: {leader.id})" if i == 0 and swarm_idx == 0 else None
-                  )
-                  
-                  # followerの軌跡（薄いカラーで表示）
-                  if len(follower.data) > 1:
-                      ax.plot(
-                          follower.data['x'],
-                          follower.data['y'],
-                          color=trajectory_color,  # リーダーと同じ軌跡カラー
-                          linewidth=0.5,
-                          alpha=0.3,  # より薄い透明度
-                          linestyle='-'
+                  if follower.role == RobotRole.FOLLOWER:
+                      fx = follower.data['x'].iloc[-1]
+                      fy = follower.data['y'].iloc[-1]
+                      ax.scatter(
+                          x=fx,
+                          y=fy,
+                          color=colors[swarm_idx % len(colors)],
+                          s=10,
+                          marker='o',
+                          alpha=0.7,
+                          label=f"Follower (Leader ID: {swarm.leader.id})" if i == 0 and swarm_idx == 0 else None
                       )
+                      if len(follower.data) > 1:
+                          ax.plot(
+                              follower.data['x'],
+                              follower.data['y'],
+                              color=trajectory_colors[swarm_idx % len(trajectory_colors)],
+                              linewidth=0.5,
+                              alpha=0.3,
+                              linestyle='-'
+                          )
 
           # 軸の調整
           ax.set_xlim(0, self.__map_width)
@@ -892,9 +846,6 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           ax.set_xlabel('X')
           ax.set_ylabel('Y')
           ax.grid(False)
-
-
-
 
           # === フォロワによる衝突点の描画 ===
           for cx, cy in self.follower_collision_points:

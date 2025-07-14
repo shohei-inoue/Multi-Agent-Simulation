@@ -145,7 +145,8 @@ class AlgorithmVfhFuzzy():
             extended_angles = np.linspace(0, 2 * np.pi, 360)
             kde_values = np.interp(extended_angles, angles, values, period=2 * np.pi)
             ax.plot(extended_angles, kde_values, color='black', linewidth=2, label="KDE-like")
-            ax.legend(loc="upper right")
+            # 凡例をグラフ外（右上）に出す
+            ax.legend(loc="upper left", bbox_to_anchor=(1.05, 1), borderaxespad=0.)
 
         # --- 選択方向の矢印（Resultのみ）---
         if i == 2 and hasattr(self, "theta") and self.theta is not None:
