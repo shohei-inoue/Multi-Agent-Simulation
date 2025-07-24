@@ -9,10 +9,7 @@ import pandas as pd
 import os
 import random
 from enum import Enum
-from typing import Dict, Any, Optional, Tuple, List
 
-from core.interfaces import Configurable, Stateful, Loggable
-from core.logging import get_component_logger
 
 class BoidsType(Enum):
     """
@@ -381,15 +378,15 @@ class Red():
         self.leader_step_count = 0
         self.leader_azimuth = self.direction_angle
         
-        # リーダーになった時点で軌跡データをリセット
-        # 新しいリーダーとしての軌跡を開始
+        # リーダーになった時点で軌跡データを初期化（既存の軌跡は保持）
         self.leader_trajectory_start_step = self.step
-        self.leader_trajectory_data = pd.DataFrame(columns=[
-            'step', 'x', 'y', 'coordinate', 'amount_of_movement',
-            'direction_angle', 'distance', 'azimuth',
-            'collision_flag', 'boids_flag', 'estimated_probability'
-        ])
-        # 現在位置を最初の軌跡点として追加
+        if not hasattr(self, 'leader_trajectory_data') or len(self.leader_trajectory_data) == 0:
+            self.leader_trajectory_data = pd.DataFrame(columns=[
+                'step', 'x', 'y', 'coordinate', 'amount_of_movement',
+                'direction_angle', 'distance', 'azimuth',
+                'collision_flag', 'boids_flag', 'estimated_probability'
+            ])
+        # 現在位置を軌跡点として追加（既存の軌跡に追加）
         self.leader_trajectory_data = pd.concat([
             self.leader_trajectory_data, 
             self.get_arguments()

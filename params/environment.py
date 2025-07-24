@@ -1,30 +1,55 @@
-from pydantic import BaseModel
-from typing import Dict, Any
+from dataclasses import dataclass
+from typing import Optional
 import json
 
-class MapParam(BaseModel):
-    width  : int = 150
-    height : int = 60
-    seed   : int = 42
+@dataclass
+class MapParam:
+    width: int = 200
+    height: int = 200
+    seed: int = 42
 
-class ObstacleParam(BaseModel):
-    probability : float = 0.005
-    maxSize     : float = 10
-    value       : int   = 1000
+@dataclass
+class ObstacleParam:
+    probability: float = 0.005
+    maxSize: float = 10
+    value: int = 1000
 
-class EnvironmentParam(BaseModel):
-    map: MapParam = MapParam()
-    obstacle: ObstacleParam = ObstacleParam()
-    
-    # Configurable interface implementation
-    def get_config(self) -> Dict[str, Any]:
-        """Get current configuration"""
+@dataclass
+class EnvironmentParam:
+    map: Optional[MapParam] = None
+    obstacle: Optional[ObstacleParam] = None
+
+    def __post_init__(self):
+        if self.map is None:
+            self.map = MapParam()
+        if self.obstacle is None:
+            self.obstacle = ObstacleParam()
+
+    def to_dict(self):
         return {
-            "map": self.map.dict(),
-            "obstacle": self.obstacle.dict()
+            "map": self.map.__dict__,
+            "obstacle": self.obstacle.__dict__
         }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            map=MapParam(**data["map"]) if "map" in data else None,
+            obstacle=ObstacleParam(**data["obstacle"]) if "obstacle" in data else None
+        )
+
+    def copy(self):
+        return EnvironmentParam(
+            map=MapParam(**self.map.__dict__),
+            obstacle=ObstacleParam(**self.obstacle.__dict__)
+        )
+
+    # Configurable interface implementation
+    def get_config(self):
+        """Get current configuration"""
+        return self.to_dict()
     
-    def set_config(self, config: Dict[str, Any]):
+    def set_config(self, config):
         """Set configuration"""
         if "map" in config:
             self.map = MapParam(**config["map"])
@@ -32,11 +57,11 @@ class EnvironmentParam(BaseModel):
             self.obstacle = ObstacleParam(**config["obstacle"])
     
     # Stateful interface implementation
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self):
         """Get current state"""
         return self.get_config()
     
-    def set_state(self, state: Dict[str, Any]):
+    def set_state(self, state):
         """Set state"""
         self.set_config(state)
     
@@ -46,7 +71,7 @@ class EnvironmentParam(BaseModel):
         self.obstacle = ObstacleParam()
     
     # Loggable interface implementation
-    def get_log_data(self) -> Dict[str, Any]:
+    def get_log_data(self):
         """Get data for logging"""
         return {
             "config": self.get_config(),

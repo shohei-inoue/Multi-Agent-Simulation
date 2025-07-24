@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from dataclasses import dataclass, asdict
 
-class RobotLoggingConfig(BaseModel):
+@dataclass
+class RobotLoggingConfig:
     """
     ロボットデータ保存の設定
     """
@@ -23,4 +24,14 @@ class RobotLoggingConfig(BaseModel):
     compress_data: bool = False  # データを圧縮するか
     
     # メモリ管理
-    max_robot_records: int = 10000  # 最大記録数（メモリ保護） 
+    max_robot_records: int = 10000  # 最大記録数（メモリ保護）
+
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**data)
+
+    def copy(self):
+        return RobotLoggingConfig(**asdict(self)) 

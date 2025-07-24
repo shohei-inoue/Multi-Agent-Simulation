@@ -132,8 +132,6 @@ class AlgorithmVfhFuzzy():
                     colors.append('tab:green')   # okay
                 else:
                     colors.append('tab:gray')    # bad
-            if hasattr(self, "selected_bin"):
-                colors[self.selected_bin] = 'gold'  # selected
         else:
             colors = ['tab:blue'] * self.BIN_NUM
 
@@ -157,76 +155,12 @@ class AlgorithmVfhFuzzy():
 
 
 
-  def policy(self, state, sampled_params, episode, log_dir: str | None = None):
+  def policy(self, state, sampled_params, episode=None, log_dir=None):
     """
-    行動決定ポリシー
-    - 学習ありなら sampled_params を用いてパラメータを更新
-    - 学習なしなら初期化時の self.th, self.k_e, self.k_c を使用
-
-    ファジィルール
-    積和平均（product inference + defuzzify）」**として定量化
-    ---------------------------------------
-    走行可能性    | 探査向上性 | 結果             
-    ---------------------------------------
-    | 低        | 低        | 悪い          |
-    | 低        | 高        | あまり良くない  |
-    | 高        | 低        | 良い          |
-    | 高        | 高        | 非常に良い     |
-    ---------------------------------------
-    アルゴリズムにおけるactionの決定
+    SwarmAgent用の行動決定ポリシー: thetaとvalid_directionsを返す。
     """
-    # stateから必要情報を取得
-    self.get_state_info(state, sampled_params)
-
-    # 走行可能性
-    self.drivability_histogram = self.get_obstacle_density_histogram()
-
-    # 探査向上生
-    self.exploration_improvement_histogram = self.get_exploration_improvement_histogram()
-
-    # ファジィ推論に基づく最終結果のヒストグラムを取得
-    self.result_histogram = self.get_final_result_histogram(self.drivability_histogram, self.exploration_improvement_histogram)
-
-    # 最終方向
-    self.theta = self.select_final_direction_by_weighted_sampling(result=self.result_histogram)
-
-    # 群分岐・統合のmode決定
-    self.mode = self._determine_swarm_mode(state, sampled_params)
-
-    # 行動の出力を作成
-    action = {
-      "theta": self.theta,
-      "mode": self.mode
-    }
-    print(f"result action | theta : {self.theta}({np.rad2deg(self.theta)}[deg]) | mode : {self.mode}")
-
-    # CSVログ保存（オプション）
-    if log_dir is not None:
-      self.save_algorithm_parameter_to_csv(
-        log_dir=log_dir,
-        episode=episode,
-        step=state.get("agent_step_count", 0),
-        params=(self.th, self.k_e, self.k_c),
-        drivability=self.drivability_histogram,
-        exploration=self.exploration_improvement_histogram,
-        result=self.result_histogram
-      )
-
-    self.selected_bin = int((np.rad2deg(self.theta) % 360) // self.BIN_SIZE_DEG)  # 可視化用に保存
-    self.selected_theta.append(self.theta)
-    action_tensor = tf.convert_to_tensor(sampled_params, dtype=tf.float32)
-
-    # algorithm.policy() の中
-    if getattr(self, "_render_flag", False):
-        self.render(ax_params=self._ax_params, ax_polar=self._ax_polar)
-        self._ax_polar[0].figure.canvas.draw()
-        self._ax_polar[0].figure.canvas.flush_events()
-        self._ax_params[0].figure.canvas.draw()
-        self._ax_params[0].figure.canvas.flush_events()
-
-    self.update_params(sampled_params[0], sampled_params[1], sampled_params[2])  # th, k_e, k_c を更新
-
-    return action_tensor, action
+    theta, valid_directions = self.select_direction_with_candidates(state, sampled_params)
+    return theta, valid_directions
   
 
   def _determine_swarm_mode(self, state, sampled_params):
@@ -309,27 +243,20 @@ class AlgorithmVfhFuzzy():
     """
     state内からこのpolicyで必要な情報を取得（群ロボット探査最適化版）
     """
-    keys = [
-       "follower_collision_data", 
-       "agent_azimuth",
-       "agent_collision_flag",
-       "agent_coordinate_x",
-       "agent_coordinate_y",
-       ]
-
-    self.agent_azimuth           = state["agent_azimuth"]
-    self.agent_collision_flag    = state["agent_collision_flag"]  # agentの衝突
-    self.agent_coordinate_x      = state["agent_coordinate_x"] # agentの座標
-    self.agent_coordinate_y      = state["agent_coordinate_y"] # agentの座標
-
-    value = state['follower_collision_data']
-    if isinstance(value, np.ndarray) and value.ndim == 1 and value.shape == (2,):
-        # [azimuth, distance] 単体のndarray → [[azimuth, distance]] のリストに変換
-        self.follower_collision_data = [value]
-    elif isinstance(value, list):
-        self.follower_collision_data = value
+    self.agent_azimuth           = state.get("agent_azimuth", 0.0)
+    self.agent_collision_flag    = state.get("agent_collision_flag", False)
+    self.agent_coordinate_x      = state.get("agent_coordinate_x", 0.0)
+    self.agent_coordinate_y      = state.get("agent_coordinate_y", 0.0)
+    value = state.get('follower_collision_data', [])
+    if isinstance(value, list) and len(value) >= 2:
+        # [azimuth, distance, azimuth, distance, ...] の形式を
+        # [(azimuth, distance), (azimuth, distance), ...] の形式に変換
+        self.follower_collision_data = []
+        for i in range(0, len(value), 2):
+            if i + 1 < len(value):
+                self.follower_collision_data.append((value[i], value[i + 1]))
     else:
-        raise ValueError(f"Invalid follower_collision_data: {value}")
+        self.follower_collision_data = []
     
 
 
@@ -438,8 +365,7 @@ class AlgorithmVfhFuzzy():
 
     # === 未探査領域への誘導強化 ===
     # 環境から探査マップを取得して未探査領域の方向を強化
-    if hasattr(self, 'env') and hasattr(self.env, 'explored_map'):
-        self._apply_unexplored_area_guidance(histogram)
+    self._apply_unexplored_area_guidance(histogram)
 
     # === 群ロボット探査最適化: パラメータベースの探査戦略 ===
     self._apply_parameter_based_exploration(histogram)
@@ -577,35 +503,73 @@ class AlgorithmVfhFuzzy():
     - 探査マップから未探査領域の方向を特定
     - 未探査領域の方向を強化
     """
-    if not hasattr(self.env, 'explored_map') or self.env.explored_map is None:
-        return
-    
-    # 現在位置から各方向の未探査率を計算
-    current_x = int(self.agent_coordinate_x)
-    current_y = int(self.agent_coordinate_y)
-    
-    # 探査範囲（現在位置から一定距離内）
-    scan_radius = 10
-    
-    for i in range(self.BIN_NUM):
-        angle = 2 * np.pi * i / self.BIN_NUM
-        unexplored_count = 0
-        total_count = 0
-        
-        # 各方向の未探査率を計算
-        for distance in range(1, scan_radius + 1):
-            check_x = int(current_x + distance * np.cos(angle))
-            check_y = int(current_y + distance * np.sin(angle))
-            
-            # マップ範囲内かチェック
-            if (0 <= check_y < self.env.explored_map.shape[0] and 
-                0 <= check_x < self.env.explored_map.shape[1]):
-                total_count += 1
-                if self.env.explored_map[check_y, check_x] == 0:  # 未探査
-                    unexplored_count += 1
-        
-        # 未探査率に基づいて方向を強化
-        if total_count > 0:
-            unexplored_ratio = unexplored_count / total_count
-            # 未探査率が高い方向を強化
-            histogram[i] *= (1.0 + unexplored_ratio * 2.0)
+    if self.env is not None and hasattr(self.env, 'explored_map') and self.env.explored_map is not None:
+        current_x = int(self.agent_coordinate_x)
+        current_y = int(self.agent_coordinate_y)
+        scan_radius = 10
+        for i in range(self.BIN_NUM):
+            angle = 2 * np.pi * i / self.BIN_NUM
+            unexplored_count = 0
+            total_count = 0
+            for distance in range(1, scan_radius + 1):
+                check_x = int(current_x + distance * np.cos(angle))
+                check_y = int(current_y + distance * np.sin(angle))
+                if (0 <= check_y < self.env.explored_map.shape[0] and 
+                    0 <= check_x < self.env.explored_map.shape[1]):
+                    total_count += 1
+                    if self.env.explored_map[check_y, check_x] == 0:
+                        unexplored_count += 1
+            if total_count > 0:
+                unexplored_ratio = unexplored_count / total_count
+                histogram[i] *= (1.0 + unexplored_ratio * 2.0)
+
+  def select_direction_with_candidates(self, state, sampled_params):
+    """
+    theta（選択方向）とvalid_directions（有効方向リスト）を返す。
+    隣接binを1経路グループとしてまとめ、各グループの中心角度とスコアを返す。
+    """
+    self.get_state_info(state, sampled_params)
+    self.drivability_histogram = self.get_obstacle_density_histogram()
+    self.exploration_improvement_histogram = self.get_exploration_improvement_histogram()
+    self.result_histogram = self.get_final_result_histogram(self.drivability_histogram, self.exploration_improvement_histogram)
+    mean_score = np.mean(self.result_histogram)
+    valid_bins = [i for i, score in enumerate(self.result_histogram) if score >= mean_score and score > 0.0]
+
+    # 隣接binをグループ化
+    groups = []
+    current_group = []
+    for idx in range(len(valid_bins)):
+        if not current_group:
+            current_group.append(valid_bins[idx])
+        else:
+            prev = current_group[-1]
+            if (valid_bins[idx] == (prev + 1) % self.BIN_NUM):
+                current_group.append(valid_bins[idx])
+            else:
+                groups.append(current_group)
+                current_group = [valid_bins[idx]]
+    if current_group:
+        # 先頭と末尾がつながっている場合
+        if groups and (current_group[0] == 0 and groups[0][-1] == self.BIN_NUM - 1):
+            groups[0] = current_group + groups[0]
+        else:
+            groups.append(current_group)
+
+    # 各グループの中心角度・代表スコア
+    valid_directions = []
+    for group in groups:
+        angles = [2 * np.pi * i / self.BIN_NUM for i in group]
+        center_angle = np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))
+        group_score = np.mean([self.result_histogram[i] for i in group])
+        valid_directions.append({"angle": center_angle, "score": group_score})
+
+    # thetaはグループのスコアで重み付けサンプリング
+    scores = np.array([d["score"] for d in valid_directions])
+    if len(scores) > 0:
+        probs = scores / scores.sum()
+        selected_idx = np.random.choice(len(valid_directions), p=probs)
+        theta = valid_directions[selected_idx]["angle"]
+    else:
+        theta = np.random.uniform(0, 2 * np.pi)
+
+    return theta, valid_directions

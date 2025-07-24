@@ -1,20 +1,7 @@
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
-
-
-class Movement:
-    min: float = 2.0
-    max: float = 3.0
-
-
-class Boids:
-    min: float = 2.0
-    max: float = 3.0
-
-class Avoidance:
-    min: float = 90.0
-    max: float = 270.0
 
 
 class BoidsType(Enum):
@@ -26,72 +13,101 @@ class BoidsType(Enum):
     INNER = 2
 
 
+@dataclass
+class Movement:
+    min: float = 2.0
+    max: float = 3.0
+
+
+@dataclass
+class Boids:
+    min: float = 2.0
+    max: float = 3.0
+
+
+@dataclass
+class Avoidance:
+    min: float = 90.0
+    max: float = 270.0
+
+
+@dataclass
 class Offset:
     position              : float     = 5.0
     step                  : int       = 0
     amount_of_movement    : float     = 0.0
     direction_angle       : float     = 0.0
     collision_flag        : bool      = False
-    boids_flag            : BoidsType = BoidsType.NONE
+    boids_flag            : "BoidsType" = BoidsType.NONE
     estimated_probability : float     = 0.0
-    one_explore_step      : int       = 40
+    one_explore_step      : int       = 60  # 1探査エリアあたりの探索ステップ数
+
+    def get_boids_flag_value(self):
+        return self.boids_flag.value if isinstance(self.boids_flag, BoidsType) else 0
 
 
+@dataclass
 class RobotParam:
-    movement  : Movement  = Movement()
-    boids     : Boids     = Boids()
-    avoidance : Avoidance = Avoidance()
-    offset    : Offset    = Offset()
-    
+    movement: Optional[Movement] = None
+    boids: Optional[Boids] = None
+    avoidance: Optional[Avoidance] = None
+    offset: Optional[Offset] = None
+
+    def __post_init__(self):
+        if self.movement is None:
+            self.movement = Movement()
+        if self.boids is None:
+            self.boids = Boids()
+        if self.avoidance is None:
+            self.avoidance = Avoidance()
+        if self.offset is None:
+            self.offset = Offset()
+
+    def to_dict(self):
+        offset_dict = {k: v for k, v in (self.offset.__dict__ if self.offset else {}).items() if k != "boids_flag"}
+        offset_dict["boids_flag"] = self.offset.get_boids_flag_value() if self.offset else 0
+        return {
+            "movement": self.movement.__dict__ if self.movement else {},
+            "boids": self.boids.__dict__ if self.boids else {},
+            "avoidance": self.avoidance.__dict__ if self.avoidance else {},
+            "offset": offset_dict
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(
+            movement=Movement(**data["movement"]) if "movement" in data else None,
+            boids=Boids(**data["boids"]) if "boids" in data else None,
+            avoidance=Avoidance(**data["avoidance"]) if "avoidance" in data else None,
+            offset=Offset(
+                **{k: v for k, v in data["offset"].items() if k != "boids_flag"},
+                boids_flag=BoidsType(data["offset"].get("boids_flag", 0))
+            ) if "offset" in data else None
+        )
+
+    def copy(self):
+        return RobotParam(
+            movement=Movement(**self.movement.__dict__),
+            boids=Boids(**self.boids.__dict__),
+            avoidance=Avoidance(**self.avoidance.__dict__),
+            offset=Offset(**self.offset.__dict__)
+        )
+
     # Configurable interface implementation
     def get_config(self) -> Dict[str, Any]:
         """Get current configuration"""
-        return {
-            "movement": {
-                "min": self.movement.min,
-                "max": self.movement.max
-            },
-            "boids": {
-                "min": self.boids.min,
-                "max": self.boids.max
-            },
-            "avoidance": {
-                "min": self.avoidance.min,
-                "max": self.avoidance.max
-            },
-            "offset": {
-                "position": self.offset.position,
-                "step": self.offset.step,
-                "amount_of_movement": self.offset.amount_of_movement,
-                "direction_angle": self.offset.direction_angle,
-                "collision_flag": self.offset.collision_flag,
-                "boids_flag": self.offset.boids_flag.value,
-                "estimated_probability": self.offset.estimated_probability,
-                "one_explore_step": self.offset.one_explore_step
-            }
-        }
+        return self.to_dict()
     
     def set_config(self, config: Dict[str, Any]):
         """Set configuration"""
         if "movement" in config:
-            self.movement.min = config["movement"].get("min", 2.0)
-            self.movement.max = config["movement"].get("max", 3.0)
+            self.movement = Movement(**config["movement"])
         if "boids" in config:
-            self.boids.min = config["boids"].get("min", 2.0)
-            self.boids.max = config["boids"].get("max", 3.0)
+            self.boids = Boids(**config["boids"])
         if "avoidance" in config:
-            self.avoidance.min = config["avoidance"].get("min", 90.0)
-            self.avoidance.max = config["avoidance"].get("max", 270.0)
+            self.avoidance = Avoidance(**config["avoidance"])
         if "offset" in config:
-            offset_config = config["offset"]
-            self.offset.position = offset_config.get("position", 5.0)
-            self.offset.step = offset_config.get("step", 0)
-            self.offset.amount_of_movement = offset_config.get("amount_of_movement", 0.0)
-            self.offset.direction_angle = offset_config.get("direction_angle", 0.0)
-            self.offset.collision_flag = offset_config.get("collision_flag", False)
-            self.offset.boids_flag = BoidsType(offset_config.get("boids_flag", 0))
-            self.offset.estimated_probability = offset_config.get("estimated_probability", 0.0)
-            self.offset.one_explore_step = offset_config.get("one_explore_step", 40)
+            self.offset = Offset(**config["offset"])
     
     # Stateful interface implementation
     def get_state(self) -> Dict[str, Any]:

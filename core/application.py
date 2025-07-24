@@ -13,7 +13,7 @@ from core.logging import Logger, get_component_logger
 from core.factories import (
     algorithm_factory, agent_factory, model_factory, environment_factory
 )
-from params.simulation import Param
+from params.simulation import SimulationParam
 
 
 @dataclass
@@ -47,49 +47,11 @@ class Application:
         self.current_experiment: Optional[ExperimentConfig] = None
         self.experiment_results: List[Dict[str, Any]] = []
     
-    def setup(self, params: Param):
-        """Setup the application with parameters"""
+    def setup(self, params: SimulationParam):
+        """Setup the application with parameters (legacy method - not used in new architecture)"""
+        # This method is kept for backward compatibility but is not used in the new architecture
+        # The new architecture uses create_simulation_environment() in main.py
         self.component_logger.log_component_event("setup_started", {"params": str(params)})
-        
-        # Create log directories
-        self.config.create_log_directories()
-        
-        # Create environment
-        self.environment = environment_factory.create(
-            "exploration", 
-            param=params
-        )
-        
-        # Create algorithm
-        self.algorithm = algorithm_factory.create(
-            params.agent.algorithm,
-            env=self.environment
-        )
-        
-        # Create model if learning is enabled
-        if params.agent.isLearning and params.agent.learningParameter:
-            self.model = model_factory.create(
-                params.agent.learningParameter.model,
-                input_dim=32  # This should be calculated from observation space
-            )
-        
-        # Create agent
-        agent_kwargs = {
-            "env": self.environment,
-            "algorithm": self.algorithm,
-            "model": self.model,
-            "optimizer": params.agent.learningParameter.optimizer if params.agent.learningParameter else "adam",
-            "gamma": params.agent.learningParameter.gamma if params.agent.learningParameter else 0.99,
-            "n_steps": params.agent.learningParameter.nStep if params.agent.learningParameter else 5,
-            "max_steps_per_episode": params.agent.maxStepsPerEpisode,
-            "action_space": self.environment.action_space
-        }
-        
-        self.agent = agent_factory.create_agent(
-            "a2c" if params.agent.isLearning else "simple",
-            **agent_kwargs
-        )
-        
         self.component_logger.log_component_event("setup_completed")
     
     def run_experiment(self, experiment_config: ExperimentConfig):
@@ -180,34 +142,8 @@ class Application:
             return episode_result
 
         # --- fallback: 従来の処理（学習しない場合など） ---
-        episode_start_time = time.time()
-        state = self.environment.reset()
-        total_reward = 0
-        step_count = 0
-        max_steps = self.current_experiment.max_steps_per_episode if self.current_experiment else 1000
-        while step_count < max_steps:
-            action_tensor, action_dict = self.agent.get_action(
-                state, episode, log_dir=log_dir
-            )
-            if hasattr(self.agent, 'capture_frame'):
-                self.agent.capture_frame()
-            next_state, reward, done, truncated, info = self.environment.step(action_dict)
-            state = next_state
-            total_reward += reward
-            step_count += 1
-            if done:
-                break
-        episode_duration = time.time() - episode_start_time
-        episode_result = {
-            "episode": episode,
-            "total_reward": total_reward,
-            "steps": step_count,
-            "duration": episode_duration,
-            "exploration_rate": self.environment.exploration_ratio,
-            "final_exploration_rate": self.environment.scorer.exploration_rate[-1] if (hasattr(self.environment.scorer, "exploration_rate") and self.environment.scorer.exploration_rate and len(self.environment.scorer.exploration_rate) > 0) else 0.0
-        }
-        self.component_logger.log_episode(episode_result)
-        return episode_result
+        # 新しいアーキテクチャでは使用されないため、エラーを発生させる
+        raise RuntimeError("Legacy fallback processing is not supported in new architecture. Use create_simulation_environment() in main.py instead.")
     
     def _save_experiment_results(self, experiment_summary: Dict[str, Any]):
         """Save experiment results"""
@@ -260,7 +196,7 @@ class Application:
         self.component_logger.log_component_event("cleanup_completed")
 
 
-def create_application(params: Param) -> Application:
+def create_application(params: SimulationParam) -> Application:
     """Factory function to create application"""
     app = Application()
     app.setup(params)

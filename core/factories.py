@@ -53,6 +53,7 @@ class AgentFactory(BaseFactory):
     
     def _setup_defaults(self):
         """Setup default agent types"""
+        # Legacy agent types - new architecture uses agent_factory.py
         from agents.agent_a2c import A2CAgent
         self.register("a2c", A2CAgent)
     
@@ -92,8 +93,8 @@ class ModelFactory(BaseFactory):
     
     def _setup_defaults(self):
         """Setup default model types"""
-        from models.actor_critic import ModelActorCritic
-        self.register("actor-critic", ModelActorCritic)
+        from models.model import Model
+        self.register("actor-critic", Model)
 
 
 class EnvironmentFactory(BaseFactory):

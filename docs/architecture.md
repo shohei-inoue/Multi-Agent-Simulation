@@ -2,7 +2,7 @@
 
 ## 概要
 
-red-group-behavior プロジェクトは、群ロボットの未知環境に対するカバレッジ問題を解くための最適化されたアーキテクチャを採用しています。
+Multi-Agent-Simulation プロジェクトは、群ロボットの未知環境に対するカバレッジ問題を解くための最適化されたアーキテクチャを採用しています。本格的な強化学習による動的な群の分岐・統合システムを実装し、効率的な探査を実現します。
 
 ## アーキテクチャの原則
 
@@ -30,6 +30,12 @@ red-group-behavior プロジェクトは、群ロボットの未知環境に対�
 - コンポーネント別のログ管理
 - メトリクスの自動収集
 
+### 5. 動的群管理 (Dynamic Swarm Management)
+
+- SystemAgent による高レベル制御
+- SwarmAgent による低レベル行動
+- 学習による適応的分岐・統合
+
 ## ディレクトリ構造
 
 ```
@@ -43,12 +49,15 @@ red-group-behavior/
 │   └── application.py             # メインアプリケーション
 ├── agents/                        # エージェント関連
 │   ├── base_agent.py             # エージェント基底クラス
-│   ├── agent_a2c.py              # A2Cエージェント
+│   ├── system_agent.py           # SystemAgent（高レベル制御）
+│   ├── swarm_agent.py            # SwarmAgent（低レベル行動）
 │   ├── agent_config.py           # エージェント設定
 │   └── agent_factory.py          # エージェントファクトリ
 ├── algorithms/                    # アルゴリズム関連
 │   ├── base_algorithm.py         # アルゴリズム基底クラス
 │   ├── vfh_fuzzy.py              # VFH-Fuzzyアルゴリズム
+│   ├── branch_algorithm.py       # 分岐アルゴリズム
+│   ├── integration_algorithm.py  # 統合アルゴリズム
 │   └── algorithm_factory.py      # アルゴリズムファクトリ
 ├── envs/                          # 環境関連
 │   ├── env.py                     # 探索環境
@@ -63,8 +72,12 @@ red-group-behavior/
 │   ├── simulation.py              # シミュレーション設定
 │   ├── environment.py             # 環境設定
 │   ├── agent.py                   # エージェント設定
+│   ├── system_agent.py           # SystemAgent設定
+│   ├── swarm_agent.py            # SwarmAgent設定
 │   ├── robot.py                   # ロボット設定
 │   ├── explore.py                 # 探査設定
+│   ├── reward.py                  # 報酬設定
+│   ├── learning.py                # 学習パラメータ
 │   └── robot_logging.py           # ロボットデータ保存設定
 ├── robots/                        # ロボット関連
 │   └── red.py                     # REDクラス
@@ -182,6 +195,107 @@ class Application:
 - リソースの適切な管理
 - エラーハンドリング
 
+## エージェントアーキテクチャ
+
+### 1. SystemAgent（高レベル制御）
+
+```python
+class SystemAgent:
+    """Global system agent for high-level control"""
+
+    def check_branch(self, swarm_state):
+        """Check if branching is needed"""
+
+    def check_integration(self, swarm_state):
+        """Check if integration is needed"""
+```
+
+**機能:**
+
+- 群の分岐・統合の判断
+- 学習パラメータの管理
+- システム全体の監視
+- 報酬設計の最適化
+
+### 2. SwarmAgent（低レベル行動）
+
+```python
+class SwarmAgent:
+    """Individual swarm agent for low-level actions"""
+
+    def get_action(self, state):
+        """Get movement action (theta)"""
+
+    def update_learning_params(self, reward):
+        """Update learning parameters"""
+```
+
+**機能:**
+
+- VFH-Fuzzy アルゴリズムによる移動
+- 学習パラメータの調整
+- 衝突回避の学習
+- 探査効率の最適化
+
+## アルゴリズムアーキテクチャ
+
+### 1. VFH-Fuzzy アルゴリズム
+
+```python
+class AlgorithmVfhFuzzy:
+    """VFH-Fuzzy algorithm for movement"""
+
+    def policy(self, state, sampled_params):
+        """Get movement direction"""
+
+    def update_params(self, th, k_e, k_c):
+        """Update algorithm parameters"""
+```
+
+**機能:**
+
+- 衝突方向の確率低下
+- 学習によるパラメータ調整
+- 探査向上性の最適化
+- フロンティアベース探査
+
+### 2. 分岐アルゴリズム
+
+```python
+class BranchAlgorithm:
+    """Base class for branching algorithms"""
+
+class MobilityBasedBranchAlgorithm:
+    """Mobility-based branching algorithm"""
+
+class RandomBranchAlgorithm:
+    """Random branching algorithm"""
+```
+
+**機能:**
+
+- 動的な群の分岐
+- 学習情報の引き継ぎ
+- 新しいリーダーの選択
+- フォロワーの再配置
+
+### 3. 統合アルゴリズム
+
+```python
+class IntegrationAlgorithm:
+    """Base class for integration algorithms"""
+
+class NearestIntegrationAlgorithm:
+    """Nearest-based integration algorithm"""
+```
+
+**機能:**
+
+- 動的な群の統合
+- 学習情報の統合
+- 探査領域の重複チェック
+- リーダーの統合
+
 ## データフロー
 
 ### 1. 初期化フロー
@@ -198,15 +312,27 @@ main.py → Application.setup() → Factories → Components
 ### 2. 実験実行フロー
 
 ```
-Application.run_experiment() → Episode Loop → Agent → Environment → Logging
+Application.run_experiment() → Episode Loop → SystemAgent → SwarmAgent → Environment → Logging
 ```
 
-1. 実験設定に基づいてエピソードを実行
-2. エージェントが行動を決定
-3. 環境で行動を実行
-4. 結果をログに記録
+1. 実験設定に基づいてエピソードを実行（100 エピソード）
+2. SystemAgent が分岐・統合を判断
+3. SwarmAgent が移動行動を決定
+4. 環境で行動を実行（200×200 マップ）
+5. 結果をログに記録
 
-### 3. ログ出力フロー
+### 3. 学習フロー
+
+```
+Environment → Reward → SwarmAgent → VFH-Fuzzy → Parameter Update
+```
+
+1. 環境から報酬を計算
+2. SwarmAgent が学習パラメータを更新
+3. VFH-Fuzzy アルゴリズムのパラメータ調整
+4. 衝突方向の確率低下
+
+### 4. ログ出力フロー
 
 ```
 Components → ComponentLogger → Logger → Files/TensorBoard
