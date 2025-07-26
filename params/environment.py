@@ -4,8 +4,8 @@ import json
 
 @dataclass
 class MapParam:
-    width: int = 200
-    height: int = 200
+    width: int = 150
+    height: int = 60
     seed: int = 42
 
 @dataclass
@@ -13,6 +13,7 @@ class ObstacleParam:
     probability: float = 0.005
     maxSize: float = 10
     value: int = 1000
+    wall_thickness: int = 3
 
 @dataclass
 class EnvironmentParam:

@@ -625,6 +625,7 @@ class Red():
         self.coordinate[1] + (dx * i / SAMPLING_NUM)
       ])
 
+      # マップ内かチェック
       if (0 < intermediate_position[0] < self.__map_height) and (0 < intermediate_position[1] < self.__map_width):
         map_y = int(intermediate_position[0])
         map_x = int(intermediate_position[1])
@@ -639,7 +640,14 @@ class Red():
           self.collision_flag = True
           return stop_position
       else:
-        continue
+        # マップ外に出た場合、衝突として処理
+        collision_position = intermediate_position
+        direction_vector = collision_position - self.coordinate
+        norm_direction_vector = np.linalg.norm(direction_vector)
+
+        stop_position = self.coordinate + (direction_vector / norm_direction_vector) * (norm_direction_vector - SAFE_DISTANCE)
+        self.collision_flag = True
+        return stop_position
 
     self.collision_flag = False
     return self.coordinate + np.array([dy, dx])

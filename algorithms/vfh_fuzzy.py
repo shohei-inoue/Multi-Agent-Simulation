@@ -45,6 +45,10 @@ class AlgorithmVfhFuzzy():
     self.agent_step_count = 0
     self.follower_collision_data = []
     
+    # 衝突回避用
+    self.last_theta = None
+    self.last_collision_theta = None  # 前回衝突した方向
+    
     # ヒストグラム
     self.BIN_NUM = 72
     self.BIN_SIZE_DEG = 360 // self.BIN_NUM
@@ -71,7 +75,6 @@ class AlgorithmVfhFuzzy():
         self.branch_threshold = branch_threshold
     if merge_threshold is not None:
         self.merge_threshold = merge_threshold
-  
 
   def render(self, ax_polar=None, ax_params=None):
     """
@@ -255,9 +258,11 @@ class AlgorithmVfhFuzzy():
         for i in range(0, len(value), 2):
             if i + 1 < len(value):
                 self.follower_collision_data.append((value[i], value[i + 1]))
-    else:
-        self.follower_collision_data = []
     
+    # 衝突フラグが立っている場合、前回の方向を衝突方向として記録
+    if self.agent_collision_flag and self.last_theta is not None:
+        self.last_collision_theta = self.last_theta
+        print(f"[COLLISION] Recording collision direction: {np.rad2deg(self.last_collision_theta):.1f}°")
 
 
   # def get_obstacle_density_histogram(self):
@@ -279,36 +284,49 @@ class AlgorithmVfhFuzzy():
 
   def get_obstacle_density_histogram(self):
     """
-    KDE + 距離重みに基づいて、滑らかな「**走行可能性**」ヒストグラムを生成。
-    衝突が多い方向は「危険」として低スコアになるように**反転処理**を含む。
+    障害物密度ヒストグラムを計算
     """
-    risk_histogram = np.zeros(self.BIN_NUM, dtype=np.float32)
-
-    sigma_angle = np.deg2rad(20)   # カーネル角度幅（20度 ≒ 1ビン）
-    sigma_distance = 5.0           # 距離スケール（大きいほど遠くでも重視）
-
-    for azimuth, distance in self.follower_collision_data:
-        if distance < 1e-6:
-            continue  # 無効データは無視
-
-        # 距離が近いほど危険 → 距離が遠いほど安全
-        dist_weight = np.exp(-distance / sigma_distance)
-
-        for i, angle in enumerate(self.ANGLES):
-            angle_diff = min(abs(angle - azimuth), 2 * np.pi - abs(angle - azimuth))
-            angle_weight = np.exp(- (angle_diff ** 2) / (2 * sigma_angle ** 2))
-            risk_histogram[i] += angle_weight * dist_weight
-
-    # 正規化（危険度の合計が1）
-    risk_histogram += 1e-6
-    risk_histogram /= np.sum(risk_histogram)
-
-    # === 【反転処理】 ===
-    drivability = 1.0 - risk_histogram
-    drivability += 1e-6  # 0除け
-    drivability /= np.sum(drivability)  # 正規化（確率分布）
-
-    return drivability
+    histogram = np.zeros(self.BIN_NUM)
+    
+    # 前回衝突した方向を避ける
+    if self.last_collision_theta is not None:
+        # 前回衝突した方向の周辺を低評価
+        collision_bin = int(self.last_collision_theta * self.BIN_NUM / (2 * np.pi)) % self.BIN_NUM
+        for i in range(self.BIN_NUM):
+            # 前回衝突した方向から離れるほど高評価
+            distance = min(abs(i - collision_bin), abs(i - collision_bin + self.BIN_NUM), abs(i - collision_bin - self.BIN_NUM))
+            if distance < 8:  # 前回衝突した方向の周辺8binを低評価
+                histogram[i] = 0.05  # より低い評価
+            else:
+                histogram[i] = 1.0
+        print(f"[AVOIDANCE] Avoiding collision direction: {np.rad2deg(self.last_collision_theta):.1f}°")
+    
+    # 各方向の障害物密度を計算
+    if self.env is not None and hasattr(self.env, 'explored_map') and self.env.explored_map is not None:
+        for i in range(self.BIN_NUM):
+            angle = 2 * np.pi * i / self.BIN_NUM
+            obstacle_count = 0
+            total_count = 0
+            
+            # スキャン範囲を設定
+            scan_distance = 10
+            
+            for distance in range(1, scan_distance + 1):
+                check_x = int(self.agent_coordinate_x + distance * np.cos(angle))
+                check_y = int(self.agent_coordinate_y + distance * np.sin(angle))
+                
+                if (0 <= check_y < self.env.explored_map.shape[0] and 
+                    0 <= check_x < self.env.explored_map.shape[1]):
+                    total_count += 1
+                    if self.env.explored_map[check_y, check_x] == 1000:  # 障害物値
+                        obstacle_count += 1
+            
+            if total_count > 0:
+                obstacle_ratio = obstacle_count / total_count
+                # 障害物密度が高いほど低評価
+                histogram[i] *= (1.0 - obstacle_ratio)
+    
+    return histogram
 
 
   def get_exploration_improvement_histogram(self) -> np.ndarray:
@@ -571,5 +589,8 @@ class AlgorithmVfhFuzzy():
         theta = valid_directions[selected_idx]["angle"]
     else:
         theta = np.random.uniform(0, 2 * np.pi)
+
+    # 選択した方向を記録（衝突回避用）
+    self.last_theta = theta
 
     return theta, valid_directions

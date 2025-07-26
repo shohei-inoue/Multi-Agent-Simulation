@@ -106,6 +106,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         self.__obstacle_probability = param.environment.obstacle.probability if param.environment and param.environment.obstacle else 0.005
         self.__obstacle_max_size = param.environment.obstacle.maxSize if param.environment and param.environment.obstacle else 10
         self.__obstacle_value = param.environment.obstacle.value if param.environment and param.environment.obstacle else 1000
+        self.__wall_thickness = param.environment.obstacle.wall_thickness if param.environment and param.environment.obstacle else 3
 
         # robot
         robot_param = param.robot_params[0] if param.robot_params else None
@@ -150,7 +151,8 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           obstacle_prob=self.__obstacle_probability,
           obstacle_max_size=self.__obstacle_max_size,
           obstacle_val=self.__obstacle_value,
-          seed=self.__map_seed
+          seed=self.__map_seed,
+          wall_thickness=self.__wall_thickness
         )
 
         self.explored_map = generate_explored_map(
@@ -235,18 +237,25 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         self.current_leader = self.robots[0]
         
         # 初期群を作成
+        self.logger.info(f"Creating initial swarm with ID: {self.initial_swarm_id}")
         initial_swarm = Swarm(
             swarm_id=self.initial_swarm_id,
             leader=self.robots[0],
             followers=self.robots[1:].copy()
         )
         
+        # 初期leaderの軌跡データを初期化
+        self.robots[0].leader_trajectory_data = pd.DataFrame(columns=[
+            'step', 'x', 'y', 'azimuth', 'role', 'swarm_id'
+        ])
+        
         # 全ロボットに群IDを設定
         for robot in self.robots:
             robot.swarm_id = self.initial_swarm_id
         
-        self.swarms.append(initial_swarm)
-        self.swarm_id_counter = 1
+        self.swarms = [initial_swarm]
+        self.swarm_id_counter = self.initial_swarm_id + 1
+        self.logger.info(f"Swarm created with ID: {initial_swarm.swarm_id}, swarm_id_counter: {self.swarm_id_counter}")
 
         # ----- set initial state -----
         initial_fcd = [np.array([0.0, 0.0], dtype=np.float32)] * self.MAX_COLLISION_NUM
@@ -334,6 +343,11 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
             followers=self.robots[1:].copy()
         )
         
+        # 初期leaderの軌跡データを初期化
+        self.robots[0].leader_trajectory_data = pd.DataFrame(columns=[
+            'step', 'x', 'y', 'azimuth', 'role', 'swarm_id'
+        ])
+        
         # 全ロボットに群IDを設定
         for robot in self.robots:
             robot.swarm_id = self.initial_swarm_id
@@ -345,6 +359,9 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         # ----- reset drawing infos -----
         self.agent_trajectory = [self.agent_coordinate.copy()] # 奇跡の初期化
         self.result_pdf_list  = [] # 統合確率分布の初期化
+        
+        # 統合されたleaderの軌跡データをリセット
+        self.integrated_leader_trajectories = {}
 
         # ----- reset state -----
         self.scorer = Score()
@@ -365,26 +382,25 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
 
 
     def _create_new_swarm(self, new_leader: Red, followers: List[Red]):
-        """
-        新しい群を作成
-        """
-        new_swarm_id = self.swarm_id_counter
-        self.swarm_id_counter += 1
-        
-        # 新しい群を作成
+        """新しい群を作成"""
+        new_swarm_id = self.get_next_swarm_id()
         new_swarm = Swarm(
             swarm_id=new_swarm_id,
             leader=new_leader,
             followers=followers
         )
         
-        # ロボットの群IDを更新
-        new_leader.swarm_id = new_swarm_id
+        # 新しいleaderの軌跡データを初期化
+        new_leader.leader_trajectory_data = pd.DataFrame(columns=[
+            'step', 'x', 'y', 'azimuth', 'role', 'swarm_id'
+        ])
+        
+        # 各followerのswarm_idを更新
         for follower in followers:
             follower.swarm_id = new_swarm_id
         
         self.swarms.append(new_swarm)
-        print(f"New swarm {new_swarm_id} created with leader {new_leader.id}")
+        return new_swarm
 
 
     def _merge_swarms(self, target_swarm: Swarm, source_swarm: Swarm):
@@ -955,6 +971,9 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                 continue
             leader = getattr(swarm, "leader", None)
             if leader is not None:
+                # 毎アクション開始時に衝突フラグをリセット
+                leader.collision_flag = False
+                
                 # 1. thetaから予定座標を算出（フロンティアベース探査）
                 next_coordinate = None
                 if theta is not None:
@@ -1117,6 +1136,17 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
               else:
                 # 衝突がない場合、最終位置を更新
                 continue
+           else:
+               # マップ外に出た場合、衝突として処理
+               print(f"Agent would move outside map at {intermediate_coordinate}")
+               collision_flag = True
+               
+               # マップ境界に衝突する事前位置の計算
+               collision_coordinate = intermediate_coordinate
+               direction_vector = collision_coordinate - self.agent_coordinate
+               norm_direction_vector = np.linalg.norm(direction_vector)
+               stop_coordinate = self.agent_coordinate + (direction_vector / norm_direction_vector) * (norm_direction_vector - SAFE_DISTANCE)
+               return stop_coordinate, collision_flag
 
         return self.agent_coordinate + np.array([dy, dx]), collision_flag
          
@@ -1155,6 +1185,17 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         """エピソード開始時の処理"""
         self.current_episode = episode
         self.env_frames = []  # フレームをリセット
+        
+        # 統合されたleaderの軌跡データをリセット
+        self.integrated_leader_trajectories = {}
+        
+        # 全leaderの軌跡データをリセット
+        for swarm in self.swarms:
+            if hasattr(swarm.leader, 'leader_trajectory_data'):
+                swarm.leader.leader_trajectory_data = pd.DataFrame(columns=[
+                    'step', 'x', 'y', 'azimuth', 'role', 'swarm_id'
+                ])
+        
         self.logger.info(f"Started episode {episode}")
 
     def end_episode(self, log_dir: str):
@@ -1618,6 +1659,11 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
             followers=branch_result.new_followers
         )
         
+        # 新しいleaderの軌跡データを初期化
+        branch_result.new_leader.leader_trajectory_data = pd.DataFrame(columns=[
+            'step', 'x', 'y', 'azimuth', 'role', 'swarm_id'
+        ])
+        
         # ロボットの群IDと役割を更新
         branch_result.new_leader.set_role(RobotRole.LEADER)
         branch_result.new_leader.swarm_id = new_swarm_id
@@ -1850,7 +1896,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
             else:
                 return True  # マップ外は衝突
         
-                return False
+        return False
 
 
 

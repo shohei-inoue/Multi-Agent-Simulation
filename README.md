@@ -346,8 +346,9 @@ Multi-Agent-Simulation/
 
 ### 必要条件
 
-- Python 3.8+
-- TensorFlow 2.x
+- Python 3.12+
+- TensorFlow 2.15+
+- Docker & Docker Compose（推奨）
 - NumPy
 - Matplotlib
 - Pandas
@@ -356,10 +357,29 @@ Multi-Agent-Simulation/
 
 ### インストール
 
+#### 方法 1: Docker（推奨）
+
 ```bash
 # リポジトリをクローン
 git clone <repository-url>
 cd Multi-Agent-Simulation
+
+# Dockerコンテナをビルドして実行
+docker-compose up --build
+```
+
+#### 方法 2: ローカル環境
+
+```bash
+# リポジトリをクローン
+git clone <repository-url>
+cd Multi-Agent-Simulation
+
+# 仮想環境を作成（推奨）
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# または
+venv\Scripts\activate  # Windows
 
 # 依存関係をインストール
 pip install -r requirements.txt
@@ -369,8 +389,105 @@ pip install -r requirements.txt
 
 ### 基本的な実行
 
+#### Docker 環境
+
+```bash
+# コンテナを起動
+docker-compose up
+
+# バックグラウンドで実行
+docker-compose up -d
+
+# ログを確認
+docker-compose logs -f
+
+# コンテナを停止
+docker-compose down
+```
+
+#### ローカル環境
+
 ```bash
 python main.py
+```
+
+### TensorBoard での学習状況確認
+
+学習状況を可視化するために TensorBoard を使用できます：
+
+#### 1. シミュレーション実行
+
+```bash
+# シミュレーションを実行（TensorBoardログが自動生成される）
+python main.py
+```
+
+#### 2. TensorBoard 起動
+
+```bash
+# 自動的に最新のログディレクトリを使用してTensorBoardを起動
+python start_tensorboard.py
+
+# または、特定のログディレクトリを指定
+python start_tensorboard.py --log-dir ./logs/experiment_001
+
+# ポートを変更する場合
+python start_tensorboard.py --port 6007
+
+# リモートアクセスを許可する場合
+python start_tensorboard.py --host 0.0.0.0
+```
+
+#### 3. ブラウザで確認
+
+TensorBoard が起動したら、ブラウザで以下の URL にアクセス：
+
+```
+http://localhost:6006
+```
+
+#### 4. 確認できる情報
+
+**Scalars（スカラー値）**
+
+- `episode/total_reward`: エピソード総報酬
+- `episode/exploration_rate`: 探査率
+- `episode/swarm_count`: 群の数
+- `episode/steps`: エピソードステップ数
+- `episode/avg_reward_per_step`: ステップあたりの平均報酬
+
+**Swarm 固有のメトリクス**
+
+- `swarm/{swarm_id}/episode_reward`: 各群のエピソード報酬
+- `swarm/{swarm_id}/step_reward`: 各群のステップ報酬
+- `swarm/{swarm_id}/avg_th`: VFH-Fuzzy パラメータ th の平均
+- `swarm/{swarm_id}/avg_k_e`: VFH-Fuzzy パラメータ k_e の平均
+- `swarm/{swarm_id}/avg_k_c`: VFH-Fuzzy パラメータ k_c の平均
+- `swarm/{swarm_id}/avg_value`: Actor-Critic の価値関数の平均
+
+**学習メトリクス**
+
+- `learning/swarm_{swarm_id}/th`: VFH-Fuzzy パラメータ th
+- `learning/swarm_{swarm_id}/k_e`: VFH-Fuzzy パラメータ k_e
+- `learning/swarm_{swarm_id}/k_c`: VFH-Fuzzy パラメータ k_c
+- `learning/swarm_{swarm_id}/value`: Actor-Critic の価値関数
+- `learning/swarm_{swarm_id}/valid_directions_count`: 有効方向の数
+- `learning/system/branch_threshold`: 分岐閾値
+- `learning/system/integration_threshold`: 統合閾値
+
+**イベント**
+
+- 分岐イベントの記録
+- 統合イベントの記録
+
+#### 5. Docker 環境での TensorBoard
+
+```bash
+# コンテナ内でTensorBoardを起動
+docker-compose exec multi-agent-simulation python start_tensorboard.py --host 0.0.0.0
+
+# ホストマシンからアクセス
+# http://localhost:6006
 ```
 
 ### 設定のカスタマイズ
@@ -379,7 +496,7 @@ python main.py
 
 - `params/simulation.py`: 全体的なシミュレーション設定
 - `params/agent.py`: エージェント設定（エピソード数、ステップ数）
-- `params/environment.py`: 環境設定（200×200 マップ）
+- `params/environment.py`: 環境設定
 - `params/system_agent.py`: SystemAgent 設定
 - `params/swarm_agent.py`: SwarmAgent 設定
 - `params/robot.py`: ロボット設定
@@ -595,6 +712,42 @@ experiment_config = ExperimentConfig(
 3. 変更をコミット (`git commit -m 'Add amazing feature'`)
 4. ブランチにプッシュ (`git push origin feature/amazing-feature`)
 5. プルリクエストを作成
+
+## 🐳 Docker
+
+### コンテナ構成
+
+- **ベースイメージ**: Python 3.12.10-slim
+- **主要パッケージ**: TensorFlow 2.15.0, Gymnasium 0.29.1, NumPy 1.26.3
+- **可視化**: matplotlib 3.8.3, imageio 2.34.0
+- **データ処理**: pandas 2.1.1, scipy 1.12.0
+
+### ボリュームマウント
+
+- `./logs:/app/logs`: ログファイルの永続化
+- `./gifs:/app/gifs`: GIF ファイルの永続化
+- `./scores:/app/scores`: スコアファイルの永続化
+
+### 環境変数
+
+- `PYTHONUNBUFFERED=1`: Python 出力のバッファリング無効化
+- `PYTHONDONTWRITEBYTECODE=1`: .pyc ファイルの生成無効化
+
+### 開発用コマンド
+
+```bash
+# コンテナ内でシェルを起動
+docker-compose exec multi-agent-simulation bash
+
+# ログをリアルタイムで確認
+docker-compose logs -f multi-agent-simulation
+
+# コンテナを再ビルド
+docker-compose build --no-cache
+
+# 特定のエピソード数のみ実行
+docker-compose run --rm multi-agent-simulation python main.py --episodes 10
+```
 
 ## 📄 ライセンス
 

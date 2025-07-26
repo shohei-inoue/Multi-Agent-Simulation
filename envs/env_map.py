@@ -13,7 +13,8 @@ def generate_rect_obstacle_map(
       obstacle_prob,
       obstacle_max_size,  
       obstacle_val,
-      seed
+      seed,
+      wall_thickness=3
   ) -> np.ndarray:
     """
     矩形障害物を配置した地図を作成
@@ -23,20 +24,24 @@ def generate_rect_obstacle_map(
     # 初期値
     obstacle_map = np.zeros((map_height, map_width), dtype=np.uint16)
 
-    # 壁の生成
-    obstacle_map[0, :]  = obstacle_val
-    obstacle_map[-1, :] = obstacle_val
-    obstacle_map[:, 0]  = obstacle_val
-    obstacle_map[:, -1] = obstacle_val
+    # 分厚い壁の生成
+    # 上端の壁
+    obstacle_map[0:wall_thickness, :] = obstacle_val
+    # 下端の壁
+    obstacle_map[map_height-wall_thickness:map_height, :] = obstacle_val
+    # 左端の壁
+    obstacle_map[:, 0:wall_thickness] = obstacle_val
+    # 右端の壁
+    obstacle_map[:, map_width-wall_thickness:map_width] = obstacle_val
 
-    # 内部にランダムに障害物を配置
-    for y in range(1, map_height):
-      for x in range( 1, map_width - 1):
+    # 内部にランダムに障害物を配置（壁の内側から開始）
+    for y in range(wall_thickness, map_height - wall_thickness):
+      for x in range(wall_thickness, map_width - wall_thickness):
         if np.random.rand() < obstacle_prob:
           rect_h = np.random.randint(2, obstacle_max_size)
           rect_w = np.random.randint(2, obstacle_max_size)
-          y2 = min(y + rect_h, map_height - 1)
-          x2 = min(x + rect_w, map_width - 1)
+          y2 = min(y + rect_h, map_height - wall_thickness)
+          x2 = min(x + rect_w, map_width - wall_thickness)
           obstacle_map[y:y2, x:x2] = obstacle_val
 
     return obstacle_map

@@ -37,7 +37,7 @@ class Reward:
 
 @dataclass
 class AgentParam:
-    episodeNum: int = 100
+    episodeNum: int = 1000
     maxStepsPerEpisode: int = 100
     system_agent_param: Optional[SystemAgentParam] = None
     swarm_agent_params: List[SwarmAgentParam] = field(default_factory=list)

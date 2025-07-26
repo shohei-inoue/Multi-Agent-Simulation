@@ -137,9 +137,6 @@ class SwarmAgent(BaseAgent):
 
     def train(self, *args, **kwargs):
         """
-        群エージェントの学習（isLearningがTrueの場合のみ）
+        学習ロジックは必要に応じて実装
         """
-        if not self.isLearning:
-            return
-        # 学習ロジックは必要に応じて実装
         pass 

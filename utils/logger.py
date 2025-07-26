@@ -184,19 +184,23 @@ class ExperimentLogger:
     """実験全体のログ管理クラス"""
     
     def __init__(self, log_dir: str, experiment_name: str = "experiment"):
+        """実験ロガーの初期化"""
         self.log_dir = Path(log_dir)
         self.experiment_name = experiment_name
-        self.tensorboard_logger = TensorBoardLogger(log_dir, experiment_name)
         
-        # 実験設定の保存
-        self.experiment_config = {}
-        
-        # メトリクス保存用ディレクトリ
+        # ディレクトリを作成
+        self.log_dir.mkdir(parents=True, exist_ok=True)
         self.metrics_dir = self.log_dir / "metrics"
-        self.metrics_dir.mkdir(parents=True, exist_ok=True)
+        self.metrics_dir.mkdir(exist_ok=True)
+        self.episodes_json_dir = self.log_dir / "episodes_json"  # 新しいディレクトリ
+        self.episodes_json_dir.mkdir(exist_ok=True)
         
-        # エピソードメトリクスの累積
+        # TensorBoardロガーを作成
+        self.tensorboard_logger = TensorBoardLogger(str(self.log_dir), experiment_name)
+        
+        # エピソードメトリクスを保存
         self.episode_metrics = []
+        self.experiment_config = {}
     
     def set_experiment_config(self, config: Dict[str, Any]):
         """実験設定を保存"""
@@ -218,7 +222,7 @@ class ExperimentLogger:
         self.tensorboard_logger.log_episode_metrics(episode, metrics)
         
         # エピソード詳細をJSONに保存
-        episode_file = self.log_dir / f"episode_{episode:04d}.json"
+        episode_file = self.episodes_json_dir / f"episode_{episode:04d}.json"
         with open(episode_file, 'w') as f:
             json.dump(episode_data, f, indent=2, default=str)
         

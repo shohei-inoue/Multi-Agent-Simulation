@@ -5,6 +5,7 @@ Uses the new optimized architecture with centralized configuration and logging.
 
 import sys
 from pathlib import Path
+import numpy as np
 
 # Add project root to path
 project_root = Path(__file__).parent
@@ -115,6 +116,10 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
     experiment_logger = create_experiment_logger(log_dir, experiment_config.name)
     experiment_logger.set_experiment_config(experiment_config.parameters)
     
+    # TensorBoardロガーを作成
+    from utils.logger import TensorBoardLogger
+    tensorboard_logger = TensorBoardLogger(log_dir, experiment_config.name)
+    
     # 初期状態を保存
     env.save_initial_state(log_dir)
     
@@ -129,6 +134,8 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
         
         episode_reward = 0
         episode_steps = 0
+        episode_swarm_rewards = {}
+        episode_learning_metrics = {}
         
         for step in range(experiment_config.max_steps_per_episode):
             # 各SwarmAgentのアクションを取得
@@ -145,8 +152,38 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
                 if swarm_exists:  # 存在する群のみ
                     # 適切な状態を取得
                     swarm_state = env.get_swarm_agent_observation(swarm_id)
-                    action, action_info = swarm_agent.get_action(swarm_state, episode)
+                    action, action_info = swarm_agent.get_action(swarm_state, episode, log_dir)
                     swarm_actions[swarm_id] = action  # action_infoではなくactionを渡す
+                    
+                    # 学習メトリクスを記録
+                    if 'learning_params' in action_info:
+                        learning_params = action_info['learning_params']
+                        # learning_paramsがリストでない場合や長さが足りない場合の処理
+                        if isinstance(learning_params, list) and len(learning_params) >= 3:
+                            learning_metrics = {
+                                'th': learning_params[0],
+                                'k_e': learning_params[1],
+                                'k_c': learning_params[2],
+                                'value': action_info.get('value', 0.0),
+                                'valid_directions_count': action_info.get('valid_directions_count', 0)
+                            }
+                        else:
+                            # デフォルト値を使用
+                            learning_metrics = {
+                                'th': 0.5,
+                                'k_e': 10.0,
+                                'k_c': 5.0,
+                                'value': action_info.get('value', 0.0),
+                                'valid_directions_count': action_info.get('valid_directions_count', 0)
+                            }
+                        
+                        tensorboard_logger.log_learning_metrics(step, learning_metrics, f"swarm_{swarm_id}")
+                        
+                        # エピソード全体の学習メトリクスを蓄積
+                        if swarm_id not in episode_learning_metrics:
+                            episode_learning_metrics[swarm_id] = []
+                        episode_learning_metrics[swarm_id].append(learning_metrics)
+                    
                     if step == 0:
                         logger.info(f"Debug: Swarm {swarm_id} action: {action}")
                 else:
@@ -156,10 +193,28 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
             # SystemAgentのアクションを取得
             # 簡易的な状態取得（実際の実装では適切なメソッドを使用）
             system_state = {"episode": episode, "step": step, "swarm_count": len(env.swarms)}
-            system_action, system_action_info = system_agent.get_action(system_state, episode)
+            system_action, system_action_info = system_agent.get_action(system_state, episode, log_dir)
+            
+            # SystemAgentの学習メトリクスを記録
+            if 'learning_params' in system_action_info:
+                system_learning_metrics = {
+                    'branch_threshold': system_action_info.get('branch_threshold', 0.0),
+                    'integration_threshold': system_action_info.get('integration_threshold', 0.0),
+                    'value': system_action_info.get('value', 0.0)
+                }
+                tensorboard_logger.log_learning_metrics(step, system_learning_metrics, "system")
             
             # 環境をステップ実行
             next_state, rewards, done, truncated, info = env.step(swarm_actions)
+            
+            # 報酬を記録
+            if isinstance(rewards, dict):
+                for swarm_id, reward in rewards.items():
+                    if swarm_id not in episode_swarm_rewards:
+                        episode_swarm_rewards[swarm_id] = 0
+                    episode_swarm_rewards[swarm_id] += reward
+                    # ステップごとの報酬を記録
+                    tensorboard_logger.log_swarm_metrics(step, swarm_id, {'step_reward': reward})
             
             # 新しい群が作成された場合、対応するSwarmAgentを作成
             for swarm in env.swarms:
@@ -180,6 +235,10 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
                     
                     # SystemAgentに新しいSwarmAgentを登録
                     system_agent.register_swarm_agent(new_swarm_agent, swarm.swarm_id)
+                    
+                    # 分岐イベントを記録
+                    tensorboard_logger.log_branch_event(episode, swarm.swarm_id, swarm.swarm_id, 
+                                                       len(swarm_actions.get(swarm.swarm_id, {}).get('valid_directions', [])), 0.0)
             
             # フレームをキャプチャ（GIF作成用）
             env.capture_frame()
@@ -214,6 +273,28 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
         }
         experiment_logger.log_episode(episode, episode_data)
         
+        # TensorBoardにエピソードメトリクスを記録
+        episode_metrics = {
+            'total_reward': episode_reward,
+            'exploration_rate': exploration_rate,
+            'swarm_count': len(env.swarms),
+            'steps': episode_steps,
+            'avg_reward_per_step': episode_reward / episode_steps if episode_steps > 0 else 0
+        }
+        tensorboard_logger.log_episode_metrics(episode, episode_metrics)
+        
+        # 各群のエピソード報酬を記録
+        for swarm_id, reward in episode_swarm_rewards.items():
+            tensorboard_logger.log_swarm_metrics(episode, swarm_id, {'episode_reward': reward})
+        
+        # 学習メトリクスの平均を記録
+        for swarm_id, metrics_list in episode_learning_metrics.items():
+            if metrics_list:
+                avg_metrics = {}
+                for key in metrics_list[0].keys():
+                    avg_metrics[f'avg_{key}'] = np.mean([m[key] for m in metrics_list])
+                tensorboard_logger.log_swarm_metrics(episode, swarm_id, avg_metrics)
+        
         # GIFを保存
         env.end_episode(log_dir)
         
@@ -230,8 +311,11 @@ def run_simulation(env, system_agent, swarm_agents, experiment_config, log_dir: 
     # 最終レポートを保存
     experiment_logger.save_final_report()
     experiment_logger.close()
+    tensorboard_logger.close()
     
     logger.info("Simulation completed with logging")
+    logger.info(f"TensorBoard logs saved to: {tensorboard_logger.tensorboard_dir}")
+    logger.info(f"To view TensorBoard, run: tensorboard --logdir {tensorboard_logger.tensorboard_dir}")
 
 
 if __name__ == "__main__":

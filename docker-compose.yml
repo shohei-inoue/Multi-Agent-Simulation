@@ -1,10 +1,16 @@
-version: "3.9"
+version: "3.8"
 
 services:
-  app:
+  multi-agent-simulation:
     build: .
-    container_name: python_app
+    container_name: multi-agent-simulation
     volumes:
-      - .:/app  # 開発用にホストのコードをマウント（必要なければ削除可）
-    working_dir: /app
-    command: python -u main.py
+      - ./logs:/app/logs
+      - ./gifs:/app/gifs
+      - ./scores:/app/scores
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
+    ports:
+      - "6006:6006" # TensorBoard port
+    command: python main.py
