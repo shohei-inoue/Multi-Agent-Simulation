@@ -1,144 +1,131 @@
 """
-SwarmAgent用のパラメータ定義
-群エージェントの設定を管理（移動方向決定に専念）
+SwarmAgent用のパラメータ設定
 """
 
-from dataclasses import dataclass, field, asdict
-from typing import Optional, Literal, List
-from params.learning import LearningParameter
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional
+
+
+@dataclass
+class LearningParameter:
+    """学習パラメータ"""
+    type: str = "swarm_agent"
+    model: str = "actor-critic"
+    optimizer: str = "adam"
+    gamma: float = 0.99
+    learningLate: float = 0.001
+    nStep: int = 5
+    inherit_learning_info: bool = True
+    merge_learning_info: bool = True
 
 
 @dataclass
 class SwarmDebugParam:
-    """SwarmAgent用のデバッグ・ログ設定"""
+    """デバッグパラメータ"""
     enable_debug_log: bool = False
-    log_movement_events: bool = True  # 移動イベントのログ
-    log_learning_events: bool = True  # 学習イベントのログ
-    
-    def to_dict(self) -> dict:
-        """パラメータを辞書形式で取得"""
-        return {
-            'enable_debug_log': self.enable_debug_log,
-            'log_movement_events': self.log_movement_events,
-            'log_learning_events': self.log_learning_events
-        }
-    
-    @classmethod
-    def from_dict(cls, data: dict) -> 'SwarmDebugParam':
-        """辞書からパラメータを作成"""
-        return cls(**data)
-    
-    def copy(self) -> 'SwarmDebugParam':
-        """パラメータのコピーを作成"""
-        return SwarmDebugParam(
-            enable_debug_log=self.enable_debug_log,
-            log_movement_events=self.log_movement_events,
-            log_learning_events=self.log_learning_events
-        )
+    log_movement_events: bool = True
+    log_learning_events: bool = True
 
 
 @dataclass
 class SwarmAgentParam:
     """SwarmAgent用のパラメータ"""
     
-    # アルゴリズム設定
-    algorithm: Literal["vfh_fuzzy"] = "vfh_fuzzy"
+    # 基本設定
+    algorithm: str = "vfh_fuzzy"
+    swarm_id: str = "swarm_default"
     
-    # 学習設定
-    isLearning: bool = True  # 学習を有効にするか
-    learningParameter: Optional[LearningParameter] = None  # 学習パラメータ
+    # 学習設定（元の設計を尊重）
+    isLearning: bool = True
+    learningParameter: Optional[LearningParameter] = None
     
-    # デバッグ・ログ設定
+    # デバッグ設定
     debug: Optional[SwarmDebugParam] = None
     
+    # VFH-Fuzzyパラメータ（学習可能）
+    th: float = 0.5        # 閾値
+    k_e: float = 10.0      # 探査向上性重み
+    k_c: float = 5.0       # 衝突回避重み
+    
+    # 移動パラメータ
+    movement_min: float = 2.0
+    movement_max: float = 3.0
+    boids_min: float = 2.0
+    boids_max: float = 3.0
+    avoidance_min: float = 2.0
+    avoidance_max: float = 3.0
+    
+    # 群制御パラメータ
+    ideal_distance: float = 5.0
+    exploration_radius: float = 10.0
+    max_followers: int = 20
+    
     def __post_init__(self):
-        """初期化後の処理"""
         if self.learningParameter is None:
-            self.learningParameter = LearningParameter(
-                type="a2c",
-                model="actor-critic",
-                optimizer="adam",
-                gamma=0.99,
-                learningLate=0.001,
-                nStep=5,
-                inherit_learning_info=True,
-                merge_learning_info=True
-            )
+            self.learningParameter = LearningParameter()
         if self.debug is None:
             self.debug = SwarmDebugParam()
     
-    def validate(self) -> bool:
-        """パラメータの妥当性を検証"""
-        # 必要ならここでLearningParameterの値を直接チェック
-        # 例: if self.isLearning and self.learningParameter is not None:
-        #         if self.learningParameter.gamma < 0 or self.learningParameter.gamma > 1:
-        #             return False
-        return True
-    
-    def to_dict(self) -> dict:
-        """パラメータを辞書形式で取得"""
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書形式で返す"""
         return {
-            'algorithm': self.algorithm,
-            'isLearning': self.isLearning,
-            'learningParameter': self.learningParameter.to_dict() if self.learningParameter else None,
-            'debug': self.debug.to_dict() if self.debug else None
+            "algorithm": self.algorithm,
+            "swarm_id": self.swarm_id,
+            "isLearning": self.isLearning,
+            "learningParameter": self.learningParameter.__dict__ if self.learningParameter else None,
+            "debug": self.debug.__dict__ if self.debug else None,
+            "th": self.th,
+            "k_e": self.k_e,
+            "k_c": self.k_c,
+            "movement_min": self.movement_min,
+            "movement_max": self.movement_max,
+            "boids_min": self.boids_min,
+            "boids_max": self.boids_max,
+            "avoidance_min": self.avoidance_min,
+            "avoidance_max": self.avoidance_max,
+            "ideal_distance": self.ideal_distance,
+            "exploration_radius": self.exploration_radius,
+            "max_followers": self.max_followers
         }
     
     @classmethod
-    def from_dict(cls, data: dict) -> 'SwarmAgentParam':
-        """辞書からパラメータを作成"""
-        # LearningParameterの復元
+    def from_dict(cls, data: Dict[str, Any]) -> 'SwarmAgentParam':
+        """辞書から作成"""
+        # ネストしたオブジェクトを適切に処理
         learning_param_data = data.get('learningParameter')
-        if learning_param_data:
-            data['learningParameter'] = LearningParameter.from_dict(learning_param_data)
+        learning_param = LearningParameter(**learning_param_data) if learning_param_data else None
         
-        # SwarmDebugParamの復元
-        debug_data = data.get('debug')
-        if debug_data:
-            data['debug'] = SwarmDebugParam.from_dict(debug_data)
+        debug_param_data = data.get('debug')
+        debug_param = SwarmDebugParam(**debug_param_data) if debug_param_data else None
         
-        return cls(**data)
-    
-    def copy(self) -> 'SwarmAgentParam':
-        """パラメータのコピーを作成"""
-        return SwarmAgentParam(
-            algorithm=self.algorithm,
-            isLearning=self.isLearning,
-            learningParameter=self.learningParameter.copy() if self.learningParameter else None,
-            debug=self.debug.copy() if self.debug else None
+        # 基本データをコピー
+        base_data = {k: v for k, v in data.items() 
+                    if k not in ['learningParameter', 'debug']}
+        
+        return cls(
+            learningParameter=learning_param,
+            debug=debug_param,
+            **base_data
         )
     
-    def get_learning_rate(self) -> float:
-        """学習率を取得（学習が無効の場合は0.0を返す）"""
-        if not self.isLearning or self.learningParameter is None:
-            return 0.0
-        return self.learningParameter.learningLate
-    
-    def get_gamma(self) -> float:
-        """割引率を取得（学習が無効の場合は0.0を返す）"""
-        if not self.isLearning or self.learningParameter is None:
-            return 0.0
-        return self.learningParameter.gamma
-    
-    def get_n_steps(self) -> int:
-        """nステップ数を取得（学習が無効の場合は0を返す）"""
-        if not self.isLearning or self.learningParameter is None:
-            return 0
-        return self.learningParameter.nStep
-    
-    def get_inherit_learning_info(self) -> bool:
-        """学習情報の引き継ぎ設定を取得（学習が無効の場合はFalseを返す）"""
-        if not self.isLearning or self.learningParameter is None:
-            return False
-        return self.learningParameter.inherit_learning_info
-    
-    def get_merge_learning_info(self) -> bool:
-        """学習情報の統合設定を取得（学習が無効の場合はFalseを返す）"""
-        if not self.isLearning or self.learningParameter is None:
-            return False
-        return self.learningParameter.merge_learning_info
-
-@dataclass
-class ContinuousRange:
-    min: float
-    max: float
+    def copy(self) -> 'SwarmAgentParam':
+        """コピーを作成"""
+        return SwarmAgentParam(
+            algorithm=self.algorithm,
+            swarm_id=self.swarm_id,
+            isLearning=self.isLearning,
+            learningParameter=self.learningParameter.copy() if self.learningParameter else None,
+            debug=self.debug.copy() if self.debug else None,
+            th=self.th,
+            k_e=self.k_e,
+            k_c=self.k_c,
+            movement_min=self.movement_min,
+            movement_max=self.movement_max,
+            boids_min=self.boids_min,
+            boids_max=self.boids_max,
+            avoidance_min=self.avoidance_min,
+            avoidance_max=self.avoidance_max,
+            ideal_distance=self.ideal_distance,
+            exploration_radius=self.exploration_radius,
+            max_followers=self.max_followers
+        )

@@ -3,7 +3,7 @@
 エージェントの設定と作成を管理
 """
 
-from agents.agent_factory import create_agent, create_system_with_swarm_agents
+from agents.agent_factory import create_agent, create_initial_agents
 from agents.swarm_agent import SwarmAgent
 from agents.system_agent import SystemAgent
 from params.agent import AgentParam
@@ -128,17 +128,9 @@ class AgentConfig:
             update_interval = getattr(self.agent_param.learningParameter, 'updateInterval', 1.0)
             initial_swarm_count = getattr(self.agent_param.learningParameter, 'initial_swarm_count', 1)
             
-            self.system_agent, self.swarm_agents = create_system_with_swarm_agents(
+            self.system_agent, self.swarm_agents = create_initial_agents(
                 env=self.env,
-                algorithm=self.algorithm,
-                model=self.model,
-                optimizer=self.optimizer,
-                gamma=self.agent_param.learningParameter.gamma,
-                n_steps=self.agent_param.learningParameter.nStep,
-                max_steps_per_episode=self.agent_param.maxStepsPerEpisode,
-                action_space=self.env.action_space,
-                initial_swarm_count=initial_swarm_count,
-                update_interval=update_interval
+                agent_param=self.agent_param
             )
             
             # 最初の群エージェントを現在のエージェントとして設定
@@ -200,7 +192,7 @@ class AgentConfig:
             if self.swarm_agents:
                 self.current_swarm_agent = self.swarm_agents[0]
                 self.agent = self.current_swarm_agent
-    else:
+            else:
                 self.current_swarm_agent = None
                 self.agent = self.system_agent
     
@@ -215,7 +207,7 @@ class AgentConfig:
         """群管理情報を取得"""
         if self.system_agent:
             return self.system_agent.get_swarm_management_info()
-    else:
+        else:
             return {
                 "current_swarm": {
                     "id": self.current_swarm_agent.get_swarm_id() if self.current_swarm_agent else "none",

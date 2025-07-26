@@ -179,3 +179,10 @@ gifs/
 outputs
 
 logs
+
+# 実験結果と学習結果を無視
+experiment_results/
+training_results/
+verification_results/
+analysis_results/
+trained_models/
