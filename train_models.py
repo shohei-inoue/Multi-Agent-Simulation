@@ -49,8 +49,8 @@ class ModelTrainer:
         sim_param = self.base_config.copy()
         
         # 学習用パラメータ設定
-        sim_param.environment.map.width = 100
-        sim_param.environment.map.height = 200
+        sim_param.environment.map.width = 200
+        sim_param.environment.map.height = 100
         sim_param.environment.obstacle.probability = 0.0  # 学習時は障害物なし
         sim_param.explore.robotNum = 20
         sim_param.explore.coordinate.x = 50.0

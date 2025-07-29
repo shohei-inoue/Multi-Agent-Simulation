@@ -616,11 +616,37 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         """
         if mode == 'rgb_gray':
           pass
+        elif mode == 'gif':
+          # GIF生成用のモード
+          if ax is None:
+              # マップのアスペクト比に合わせてfigsizeを調整
+              aspect_ratio = self.__map_width / self.__map_height
+              if aspect_ratio > 1:
+                  # 横幅が大きい場合（200x100など）
+                  fig_width = 12  # 横幅を大きくする
+                  fig_height = 12 / aspect_ratio
+              else:
+                  # 縦幅が大きい場合
+                  fig_height = 12
+                  fig_width = 12 * aspect_ratio
+              
+              fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+          else:
+              fig = ax.figure
         elif mode == 'rgb_array':
           # GIF保存用のrgb_arrayモード
           fig, ax = plt.subplots(figsize=(fig_size, fig_size))
           
-          # 地図
+          # 背景を白で表示
+          ax.imshow(
+              np.ones((self.__map_height, self.__map_width)),
+              cmap='gray',
+              vmin=0, vmax=1,
+              origin='lower',
+              extent=(0, self.__map_width, 0, self.__map_height),
+          )
+          
+          # 地図（障害物を黒で表示）
           ax.imshow(
               self.__map,
               cmap='gray_r',
@@ -628,16 +654,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
               extent=(0, self.__map_width, 0, self.__map_height),
           )
 
-          # 探査済み領域
-          cmap = mColors.ListedColormap(['white', 'gray', 'black'])
-          bounds = [0, 1, self.__obstacle_value, self.__obstacle_value + 1]
-          norm = mColors.BoundaryNorm(bounds, cmap.N)
-
+          # 探査済み領域（薄いグレーで表示）
+          explored_display = np.where(self.explored_map > 0, 1, 0)
           ax.imshow(
-              self.explored_map,
-              cmap=cmap,
-              alpha=0.5,
-              norm=norm,
+              explored_display,
+              cmap='gray',
+              alpha=0.2,  # より薄い透明度
               origin='lower',
               extent=(0, self.__map_width, 0, self.__map_height),
           )
@@ -733,12 +755,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                       label=f"Follower (Leader ID: {leader.id})" if i == 0 and swarm_idx == 0 else None
                   )
                   
-                  # followerの軌跡（薄いカラーで表示）
-                  if len(follower.data) > 1:
+                  # フォロワの軌跡（薄い線で表示）
+                  if len(follower.data['x']) > 1:
                       ax.plot(
                           follower.data['x'],
                           follower.data['y'],
-                          color=trajectory_color,  # リーダーと同じ軌跡カラー
+                          color='gray',  # グレーで統一
                           linewidth=0.5,
                           alpha=0.3,  # より薄い透明度
                           linestyle='-'
@@ -804,7 +826,21 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           else:
             ax.clear()
 
-          # 地図
+          # 背景色を白に設定
+          ax.set_facecolor('white')
+          fig.patch.set_facecolor('white')
+          
+          # 背景を白で表示（最初に白い背景を描画）
+          background = np.ones((self.__map_height, self.__map_width))
+          ax.imshow(
+              background,
+              cmap='gray',
+              vmin=1, vmax=1,  # 白を表示するため
+              origin='lower',
+              extent=(0, self.__map_width, 0, self.__map_height),
+          )
+          
+          # 地図（障害物を黒で表示）
           ax.imshow(
               self.__map,
               cmap='gray_r',
@@ -812,21 +848,15 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
               extent=(0, self.__map_width, 0, self.__map_height),
           )
 
-          # 探査済み領域
-          cmap = mColors.ListedColormap(['white', 'gray', 'black'])
-          bounds = [0, 1, self.__obstacle_value, self.__obstacle_value + 1]
-          norm = mColors.BoundaryNorm(bounds, cmap.N)
-
+          # 探査済み領域（薄いグレーで表示）
+          explored_display = np.where(self.explored_map > 0, 1, 0)
           ax.imshow(
-              self.explored_map,
-              cmap=cmap,
-              alpha=0.5,
-              norm=norm,
+              explored_display,
+              cmap='gray',
+              alpha=0.2,  # より薄い透明度
               origin='lower',
               extent=(0, self.__map_width, 0, self.__map_height),
           )
-
-
 
           # 各群のロボットを描画
           colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
@@ -919,12 +949,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                       label=f"Follower (Leader ID: {leader.id})" if i == 0 and swarm_idx == 0 else None
                   )
                   
-                  # followerの軌跡（薄いカラーで表示）
-                  if len(follower.data) > 1:
+                  # フォロワの軌跡（薄い線で表示）
+                  if len(follower.data['x']) > 1:
                       ax.plot(
                           follower.data['x'],
                           follower.data['y'],
-                          color=trajectory_color,  # リーダーと同じ軌跡カラー
+                          color='gray',  # グレーで統一
                           linewidth=0.5,
                           alpha=0.3,  # より薄い透明度
                           linestyle='-'
@@ -950,6 +980,136 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           by_label = dict(zip(labels, handles))
           ax.legend(by_label.values(), by_label.keys(), loc='upper right', fontsize=8)
 
+        # GIFモードの場合は、rgb_arrayモードと同じ処理を行う
+        elif mode == 'gif':
+          # 背景を白で表示
+          ax.imshow(
+              np.ones((self.__map_height, self.__map_width)),
+              cmap='gray',
+              vmin=0, vmax=1,
+              origin='lower',
+              extent=(0, self.__map_width, 0, self.__map_height),
+          )
+          
+          # 地図（障害物を黒で表示）
+          ax.imshow(
+              self.__map,
+              cmap='gray_r',
+              origin='lower',
+              extent=(0, self.__map_width, 0, self.__map_height),
+          )
+
+          # 探査済み領域（薄いグレーで表示）
+          explored_display = np.where(self.explored_map > 0, 1, 0)
+          ax.imshow(
+              explored_display,
+              cmap='gray',
+              alpha=0.3,
+              origin='lower',
+              extent=(0, self.__map_width, 0, self.__map_height),
+          )
+
+          # 各群のロボットを描画
+          colors = ['blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan', 'magenta']
+          trajectory_colors = ['darkgreen', 'darkorange', 'darkred', 'darkblue', 'darkviolet', 'darkcyan', 'darkmagenta', 'darkgoldenrod', 'darkseagreen', 'darkslateblue']
+          
+          for swarm_idx, swarm in enumerate(self.swarms):
+              # リーダーIDに基づいてカラーを決定
+              leader_id = int(swarm.leader.id) if swarm.leader.id.isdigit() else hash(swarm.leader.id) % len(colors)
+              leader_color = colors[leader_id % len(colors)]
+              trajectory_color = trajectory_colors[leader_id % len(trajectory_colors)]
+              
+              # leaderの描画（探査中心として表示）
+              leader = swarm.leader
+              ax.scatter(
+                  x=leader.data['x'].iloc[-1],
+                  y=leader.data['y'].iloc[-1],
+                  color=leader_color,  # リーダー固有のカラー
+                  s=25,
+                  marker='*',
+                  edgecolors='black',
+                  linewidth=1,
+                  label=f"Swarm {swarm.swarm_id} Leader (ID: {leader.id})"
+              )
+              
+              # leaderの軌跡（リーダー固有のカラーで表示）
+              if hasattr(leader, 'leader_trajectory_data') and len(leader.leader_trajectory_data) > 0:
+                  # リーダーになった時点からの軌跡を表示
+                  ax.plot(
+                      leader.leader_trajectory_data['x'],
+                      leader.leader_trajectory_data['y'],
+                      color=trajectory_color,  # リーダー固有の軌跡カラー
+                      linewidth=1.5,
+                      alpha=0.6,  # 適度な透明度
+                      linestyle='-',
+                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
+                  )
+              else:
+                  # 従来の軌跡表示（フォールバック）
+                  ax.plot(
+                      leader.data['x'],
+                      leader.data['y'],
+                      color=trajectory_color,  # リーダー固有の軌跡カラー
+                      linewidth=1.5,
+                      alpha=0.6,  # 適度な透明度
+                      linestyle='-',
+                      label=f"Leader {swarm.swarm_id} Trajectory (ID: {leader.id})"
+                  )
+              
+              # leaderを中心とした探査領域の表示
+              if len(leader.data['x']) > 0:
+                  current_x = leader.data['x'].iloc[-1]
+                  current_y = leader.data['y'].iloc[-1]
+                  
+                  # 探査領域の円を描画
+                  circle = Circle(
+                      (current_x, current_y), 
+                      self.exploration_radius, 
+                      color='blue', 
+                      alpha=0.1, 
+                      fill=True,
+                      linestyle='--',
+                      linewidth=1
+                  )
+                  ax.add_patch(circle)
+                  
+                  # 探査領域の境界線
+                  circle_boundary = Circle(
+                      (current_x, current_y), 
+                      self.exploration_radius, 
+                      color='blue', 
+                      alpha=0.3, 
+                      fill=False,
+                      linestyle='--',
+                      linewidth=1.5
+                  )
+                  ax.add_patch(circle_boundary)
+              
+              # フォロワの描画
+              for follower in swarm.followers:
+                  if len(follower.data['x']) > 0:
+                      fx = follower.data['x'].iloc[-1]
+                      fy = follower.data['y'].iloc[-1]
+                      ax.scatter(
+                          fx, fy,
+                          color=leader_color,  # リーダーと同じカラー
+                          s=15,
+                          marker='o',
+                          edgecolors='black',
+                          linewidth=0.5,
+                          alpha=0.8
+                      )
+                      
+                      # フォロワの軌跡（薄い線で表示）
+                      if len(follower.data['x']) > 1:
+                          ax.plot(
+                              follower.data['x'],
+                              follower.data['y'],
+                              color=trajectory_color,  # リーダーと同じ軌跡カラー
+                              linewidth=0.5,
+                              alpha=0.3,  # より薄い透明度
+                              linestyle='-'
+                          )
 
         #   # === フォロワの現在位置 ===
         #   for i, follower in enumerate(self.follower_robots):
@@ -1972,11 +2132,32 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
     def render_gif_frame(self, fig_size=8):
         """
         GIF作成用のフレームをレンダリング
-        各群の表示、軌跡、探査済みセルの色変更を含む
+        main.pyと同じように環境の状態を表示
         """
-        fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+        # 固定サイズでフレームを生成（GIF生成の安定性のため）
+        plt.rcParams['figure.dpi'] = 100
+        plt.rcParams['savefig.dpi'] = 100
         
-        # 地図（障害物）
+        # マップのアスペクト比に合わせてfigsizeを調整
+        aspect_ratio = self.__map_width / self.__map_height
+        if aspect_ratio > 1:
+            # 横幅が大きい場合（200x100など）
+            fig_width = 12  # 横幅を大きくする
+            fig_height = 12 / aspect_ratio
+        else:
+            # 縦幅が大きい場合
+            fig_height = 12
+            fig_width = 12 * aspect_ratio
+        
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        fig.set_size_inches(fig_width, fig_height)
+        fig.set_dpi(100)
+        
+        # 背景色を白に設定
+        ax.set_facecolor('white')
+        fig.patch.set_facecolor('white')
+        
+        # 地図（障害物を黒で表示）
         ax.imshow(
             self.__map,
             cmap='gray_r',
@@ -1984,18 +2165,12 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
             extent=(0, self.__map_width, 0, self.__map_height),
         )
         
-        # 探査済み領域（灰色で表示）
-        explored_cmap = mColors.ListedColormap(['none', 'gray'])
-        explored_norm = mColors.BoundaryNorm([0, 0.5, 1], explored_cmap.N)
-        
-        # 探査済みマップを0-1の範囲に正規化
+        # 探査済み領域（薄いグレーで表示）
         explored_display = np.where(self.explored_map > 0, 1, 0)
-        
         ax.imshow(
             explored_display,
-            cmap=explored_cmap,
-            alpha=0.3,
-            norm=explored_norm,
+            cmap='gray',
+            alpha=0.2,  # より薄い透明度
             origin='lower',
             extent=(0, self.__map_width, 0, self.__map_height),
         )
@@ -2003,34 +2178,6 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         # 各群の色定義
         swarm_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
         trajectory_colors = ['darkred', 'darkblue', 'darkgreen', 'darkorange', 'darkviolet', 'darkcyan', 'darkmagenta', 'darkgoldenrod', 'darkseagreen', 'darkslateblue']
-        
-        # 統合されたleaderの軌跡を描画（太い線で表示）
-        for leader_id, trajectory_data in self.integrated_leader_trajectories.items():
-            if (trajectory_data is not None and 
-                len(trajectory_data) > 1 and
-                'x' in trajectory_data.columns and 
-                'y' in trajectory_data.columns):
-                
-                # leaderのIDに基づいて色を決定
-                try:
-                    leader_color_idx = int(leader_id) % len(trajectory_colors)
-                except (ValueError, TypeError):
-                    leader_color_idx = hash(leader_id) % len(trajectory_colors)
-                leader_trajectory_color = trajectory_colors[leader_color_idx]
-                
-                # 軌跡データが有効な場合のみ描画（太い線で表示）
-                x_data = trajectory_data['x'].dropna()
-                y_data = trajectory_data['y'].dropna()
-                
-                if len(x_data) > 1 and len(y_data) > 1:
-                    ax.plot(
-                        x_data,
-                        y_data,
-                        color=leader_trajectory_color,
-                        linewidth=3,  # 統合されたleaderの軌跡は太く表示
-                        alpha=0.8,
-                        linestyle='-'
-                    )
         
         # 各群を描画
         for swarm_idx, swarm in enumerate(self.swarms):
@@ -2084,74 +2231,101 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                         linestyle='-'
                     )
             
-            # 群の境界（outer_boundary）
-            circle = Circle(
-                (current_x, current_y),
-                self.exploration_radius,
-                color=swarm_color,
-                alpha=0.1,
-                fill=True,
-                linestyle='--',
-                linewidth=1
-            )
-            ax.add_patch(circle)
-            
-            # Followersの描画
+            # フォロワの描画
             for follower in swarm.followers:
-                # followerの現在位置を直接取得
-                follower_x = follower.x
-                follower_y = follower.y
-                
-                # Follower（円マーカー）
-                ax.scatter(
-                    follower_x, follower_y,
-                    color='red',
-                    s=30,
-                    marker='o',
-                    edgecolors='black',
-                    linewidth=1,
-                    alpha=0.8
-                )
-                
-                # Followerの軌跡（灰色で表示）
-                if len(follower.data['x']) > 1:
-                    ax.plot(
-                        follower.data['x'],
-                        follower.data['y'],
-                        color='gray',
-                        linewidth=1,
-                        alpha=0.3,
-                        linestyle=':'
+                if len(follower.data['x']) > 0:
+                    fx = follower.data['x'].iloc[-1]
+                    fy = follower.data['y'].iloc[-1]
+                    ax.scatter(
+                        fx, fy,
+                        color=swarm_color,  # リーダーと同じカラー
+                        s=15,
+                        marker='o',
+                        edgecolors='black',
+                        linewidth=0.5,
+                        alpha=0.8
                     )
+                    
+                    # フォロワの軌跡（薄い線で表示）
+                    if len(follower.data['x']) > 1:
+                        ax.plot(
+                            follower.data['x'],
+                            follower.data['y'],
+                            color='gray',  # グレーで統一
+                            linewidth=0.5,
+                            alpha=0.3,  # より薄い透明度
+                            linestyle='-'
+                        )
         
-        # グラフの設定（legendsを表示するため範囲を拡張）
-        margin = 20  # legends用のマージン
-        ax.set_xlim(-margin, self.__map_width + margin)
-        ax.set_ylim(-margin, self.__map_height + margin)
+        # 軸の設定
+        ax.set_xlim(0, self.__map_width)
+        ax.set_ylim(0, self.__map_height)
         ax.set_aspect('equal')
-        ax.set_title(f'Episode {self.current_episode} - Exploration Progress', fontsize=14)
-        ax.set_xlabel('X Position', fontsize=12)
-        ax.set_ylabel('Y Position', fontsize=12)
         
-        # 軸のメモリ表示を消す
+        # メモリを削除
         ax.set_xticks([])
         ax.set_yticks([])
         
-        # 凡例
-        ax.legend(loc='upper right', fontsize=10)
-        
-        # 探査率と群数の表示
-        exploration_rate = self.get_exploration_rate()
-        info_text = f'Exploration Rate: {exploration_rate:.2%}\nSwarm Count: {len(self.swarms)}'
-        ax.text(-15, self.__map_height + 15, info_text, 
-                fontsize=12, 
-                verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+        # グリッド線
+        ax.grid(True, alpha=0.3)
         
         # フレームを画像として保存
         fig.canvas.draw()
-        frame = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        frame = frame.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        
+        # マップサイズに合わせてフレームサイズを調整
+        # 200x100のマップに対して、800x400のフレームを生成
+        target_width = 800
+        target_height = int(target_width * (self.__map_height / self.__map_width))
+        
+        try:
+            # キャンバスから画像データを取得
+            buf = fig.canvas.tostring_rgb()
+            frame = np.frombuffer(buf, dtype=np.uint8)
+            
+            # 実際のキャンバスサイズを取得
+            canvas_width, canvas_height = fig.canvas.get_width_height()
+            actual_size = canvas_width * canvas_height * 3
+            
+            if len(frame) == actual_size:
+                # 正しいサイズの場合、リシェイプしてリサイズ
+                frame = frame.reshape((canvas_height, canvas_width, 3))
+                
+                # PILを使用してリサイズ
+                from PIL import Image
+                img = Image.fromarray(frame)
+                img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                frame = np.array(img)
+            else:
+                # サイズが合わない場合は、代替方法を試す
+                print(f"Warning: Frame size mismatch. Expected {actual_size}, got {len(frame)}")
+                
+                # 代替方法: 保存して読み込み
+                import tempfile
+                import os
+                
+                # 一時ファイルに保存
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                    fig.savefig(tmp_file.name, dpi=100, bbox_inches='tight', pad_inches=0)
+                    tmp_path = tmp_file.name
+                
+                # PILで読み込み
+                from PIL import Image
+                img = Image.open(tmp_path)
+                img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+                frame = np.array(img)
+                
+                # 一時ファイルを削除
+                os.unlink(tmp_path)
+                
+        except Exception as e:
+            print(f"Error in frame generation: {e}")
+            # エラーが発生した場合は、空のフレームを生成
+            frame = np.zeros((target_height, target_width, 3), dtype=np.uint8)
+            # デバッグ用に赤い枠を追加
+            frame[0:10, :, 0] = 255  # 上辺を赤に
+            frame[-10:, :, 0] = 255  # 下辺を赤に
+            frame[:, 0:10, 0] = 255  # 左辺を赤に
+            frame[:, -10:, 0] = 255  # 右辺を赤に
         
         plt.close(fig)
         return frame

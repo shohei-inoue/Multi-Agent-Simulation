@@ -192,7 +192,7 @@ class AgentConfig:
             if self.swarm_agents:
                 self.current_swarm_agent = self.swarm_agents[0]
                 self.agent = self.current_swarm_agent
-            else:
+    else:
                 self.current_swarm_agent = None
                 self.agent = self.system_agent
     
@@ -207,7 +207,7 @@ class AgentConfig:
         """群管理情報を取得"""
         if self.system_agent:
             return self.system_agent.get_swarm_management_info()
-        else:
+    else:
             return {
                 "current_swarm": {
                     "id": self.current_swarm_agent.get_swarm_id() if self.current_swarm_agent else "none",
