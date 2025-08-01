@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Config_E 学習モデル作成スクリプト
+Config_C 学習モデル作成スクリプト
 SystemAgent: 学習あり、分岐・統合あり
 SwarmAgent: 学習なし
 """
@@ -43,8 +43,8 @@ def setup_training_environment():
     
     return sim_param
 
-def setup_config_e_agent():
-    """Config_E用エージェント設定"""
+def setup_config_c_agent():
+    """Config_C用エージェント設定"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
     from params.swarm_agent import SwarmAgentParam
@@ -75,7 +75,7 @@ def setup_config_e_agent():
 
 def run_training():
     """学習実行"""
-    print("=== Config_E 学習開始 ===")
+    print("=== Config_C 学習開始 ===")
     
     try:
         # 1. 環境設定
@@ -85,7 +85,7 @@ def run_training():
         
         # 2. エージェント設定
         print("2. エージェント設定中...")
-        agent_param = setup_config_e_agent()
+        agent_param = setup_config_c_agent()
         print("✓ エージェント設定完了")
         
         # 3. 環境作成
@@ -106,7 +106,7 @@ def run_training():
         print("✓ SystemAgent設定完了")
         
         # 学習結果保存用ディレクトリ作成
-        output_dir = "trained_models/config_e"
+        output_dir = "trained_models/config_c"
         os.makedirs(output_dir, exist_ok=True)
         print(f"✓ 出力ディレクトリ作成: {output_dir}")
         
@@ -201,7 +201,7 @@ def run_training():
         print("7. モデル保存中...")
         
         # SystemAgentモデル保存
-        system_model_path = os.path.join(output_dir, "system_agent_model_e.h5")
+        system_model_path = os.path.join(output_dir, "system_agent_model_c.h5")
         system_agent.save_model(system_model_path)
         print(f"  ✓ SystemAgent モデル保存完了: {system_model_path}")
         
@@ -215,7 +215,7 @@ def run_training():
         return False
 
 if __name__ == "__main__":
-    print("=== Config_E 学習開始 ===")
+    print("=== Config_C 学習開始 ===")
     print(f"開始時刻: {datetime.now()}")
     
     success = run_training()

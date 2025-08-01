@@ -148,9 +148,18 @@ class SystemAgent(BaseAgent):
             learning_info
         )
         
+        # 新しいSwarmAgentがNoneの場合は分岐を中止
+        if new_swarm_agent is None:
+            if self.debug and self.debug.enable_debug_log:
+                print(f"SystemAgent: Failed to create new swarm agent for swarm {swarm_id}")
+            return
+        
         # 4. 新しい群エージェントを登録
         self.swarm_agents[new_swarm_id] = new_swarm_agent
         self.current_swarm_count += 1
+        
+        if self.debug and self.debug.enable_debug_log:
+            print(f"SystemAgent: Registered new swarm agent {new_swarm_id}")
         
         # 5. 環境の分岐処理を呼び出し（アルゴリズムタイプを渡す）
         if hasattr(self.env, 'handle_swarm_branch'):
@@ -281,15 +290,24 @@ class SystemAgent(BaseAgent):
                                learning_info: Dict[str, Any]):
         """新しい群エージェントを作成"""
         if source_swarm_id not in self.swarm_agents:
+            print(f"Warning: Source swarm {source_swarm_id} not found in registered agents")
             return None
         
         source_agent = self.swarm_agents[source_swarm_id]
         
-        # 新しいSwarmAgentを作成（ファクトリを使用）
-        from agents.agent_factory import create_branched_swarm_agent
-        new_agent = create_branched_swarm_agent(source_agent, new_swarm_id, learning_info)
+        # source_agentがNoneの場合のチェック
+        if source_agent is None:
+            print(f"Warning: Source agent for swarm {source_swarm_id} is None")
+            return None
         
-        return new_agent
+        # 新しいSwarmAgentを作成（ファクトリを使用）
+        try:
+            from agents.agent_factory import create_branched_swarm_agent
+            new_agent = create_branched_swarm_agent(source_agent, new_swarm_id, learning_info)
+            return new_agent
+        except Exception as e:
+            print(f"Error creating branched swarm agent: {e}")
+            return None
 
     def register_swarm_agent(self, swarm_agent, swarm_id: int):
         """群エージェントを登録"""

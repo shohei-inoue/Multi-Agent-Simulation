@@ -91,25 +91,40 @@ def create_branched_swarm_agent(source_swarm_agent: SwarmAgent, new_swarm_id: in
     """
     分岐時に新しいSwarmAgentを作成
     """
-    # パラメータをコピー
-    new_param = copy.deepcopy(source_swarm_agent.param)
+    # source_swarm_agentがNoneの場合のチェック
+    if source_swarm_agent is None:
+        print(f"Error: source_swarm_agent is None for new_swarm_id {new_swarm_id}")
+        return None
     
-    # 新しいSwarmAgentを作成
-    new_swarm_agent = SwarmAgent(
-        env=source_swarm_agent.env,
-        algorithm=source_swarm_agent.algorithm,
-        model=source_swarm_agent.model,  # 同じモデルを共有
-        action_space=source_swarm_agent.action_space,
-        param=new_param,
-        system_agent=source_swarm_agent.system_agent,
-        swarm_id=new_swarm_id
-    )
+    # paramがNoneの場合のチェック
+    if source_swarm_agent.param is None:
+        print(f"Error: source_swarm_agent.param is None for new_swarm_id {new_swarm_id}")
+        return None
     
-    # 学習情報を引き継ぐ
-    if learning_info and learning_info.get('model_weights') is not None and new_swarm_agent.model is not None:
-        new_swarm_agent.model.set_weights(learning_info['model_weights'])
-    
-    return new_swarm_agent
+    try:
+        # パラメータをコピー
+        new_param = copy.deepcopy(source_swarm_agent.param)
+        
+        # 新しいSwarmAgentを作成
+        new_swarm_agent = SwarmAgent(
+            env=source_swarm_agent.env,
+            algorithm=source_swarm_agent.algorithm,
+            model=source_swarm_agent.model,  # 同じモデルを共有
+            action_space=source_swarm_agent.action_space,
+            param=new_param,
+            system_agent=source_swarm_agent.system_agent,
+            swarm_id=new_swarm_id
+        )
+        
+        # 学習情報を引き継ぐ
+        if learning_info and learning_info.get('model_weights') is not None and new_swarm_agent.model is not None:
+            new_swarm_agent.model.set_weights(learning_info['model_weights'])
+        
+        return new_swarm_agent
+        
+    except Exception as e:
+        print(f"Error creating branched swarm agent: {e}")
+        return None
 
 
 def create_initial_agents(env, agent_param: AgentParam) -> Tuple[SystemAgent, Dict[int, SwarmAgent]]:

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """
-Config_B 検証スクリプト (障害物密度: 0.0)
-SystemAgent: 学習なし、分岐・統合なし
-SwarmAgent: 学習あり
+単一障害物密度検証スクリプト (密度: 0.005)
 """
 
 import os
@@ -21,13 +19,13 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 3
+    sim_param.episodeNum = 100  # 並列処理のため3回に削減
     sim_param.maxStepsPerEpisode = 200
     
     # 環境設定
     sim_param.environment.map.width = 200
     sim_param.environment.map.height = 100
-    sim_param.environment.obstacle.probability = 0.0
+    sim_param.environment.obstacle.probability = 0.005
     
     # 探査設定
     sim_param.explore.robotNum = 20
@@ -44,12 +42,11 @@ def setup_verification_environment():
     
     return sim_param
 
-def setup_config_b_agent():
-    """Config_B用エージェント設定"""
+def setup_config_a_agent():
+    """Config_A用エージェント設定"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
     from params.swarm_agent import SwarmAgentParam
-    from params.learning import LearningParameter
     
     agent_param = AgentParam()
     
@@ -60,17 +57,17 @@ def setup_config_b_agent():
     system_param.integration_condition.integration_enabled = False
     agent_param.system_agent_param = system_param
     
-    # SwarmAgent設定（学習あり）
+    # SwarmAgent設定（学習なし）
     swarm_param = SwarmAgentParam()
-    swarm_param.isLearning = True
-    swarm_param.learningParameter = LearningParameter()
+    swarm_param.isLearning = False
+    swarm_param.learningParameter = None
     agent_param.swarm_agent_params = [swarm_param]
     
     return agent_param
 
 def run_verification():
     """検証実行"""
-    print("=== Config_B 検証開始 (障害物密度: 0.0) ===")
+    print(f"=== Config_A 検証開始 (障害物密度: 0.005) ===")
     
     try:
         # 1. 環境設定
@@ -80,7 +77,7 @@ def run_verification():
         
         # 2. エージェント設定
         print("2. エージェント設定中...")
-        agent_param = setup_config_b_agent()
+        agent_param = setup_config_a_agent()
         print("✓ エージェント設定完了")
         
         # 3. 環境作成
@@ -95,27 +92,17 @@ def run_verification():
         system_agent, swarm_agents = create_initial_agents(env, agent_param)
         print(f"✓ エージェント作成完了 - SwarmAgents: {len(swarm_agents)}")
         
-        # 5. 学習済みモデルの読み込み
-        print("5. 学習済みモデル読み込み中...")
-        for swarm_id, agent in swarm_agents.items():
-            model_path = f"trained_models/swarm_agent_model_{swarm_id}.h5"
-            if os.path.exists(model_path):
-                agent.load_model(model_path)
-                print(f"  ✓ SwarmAgent {swarm_id} モデル読み込み完了")
-            else:
-                print(f"  ⚠️ SwarmAgent {swarm_id} モデルファイルが見つかりません: {model_path}")
-        
-        # 6. SystemAgentを環境に設定
-        print("6. SystemAgentを環境に設定中...")
+        # 5. SystemAgentを環境に設定
+        print("5. SystemAgentを環境に設定中...")
         env.set_system_agent(system_agent)
         print("✓ SystemAgent設定完了")
         
         # 結果保存用ディレクトリ作成
-        output_dir = "verification_results/Config_B_obstacle_0.0"
+        output_dir = f"verification_results/Config_A_obstacle_0.005"
         os.makedirs(output_dir, exist_ok=True)
         print(f"✓ 出力ディレクトリ作成: {output_dir}")
         
-        # 7. エピソード実行
+        # 6. エピソード実行
         results = []
         for episode in range(sim_param.episodeNum):
             print(f"\n--- エピソード {episode + 1}/{sim_param.episodeNum} ---")
@@ -125,36 +112,75 @@ def run_verification():
             state = env.reset()
             print(f"  環境リセット完了")
             
-            # GIF生成のためのフレームキャプチャ開始
-            env.capture_frame()
-            
             episode_data = {
                 'episode': episode + 1,
                 'steps_to_target': None,
                 'final_exploration_rate': 0.0,
-                'steps_taken': 0
+                'steps_taken': 0,
+                'step_details': []  # 詳細なstepデータを追加
             }
             
             # ステップ実行
             for step in range(sim_param.maxStepsPerEpisode):
-                if step % 20 == 0:  # 20ステップごとにログ
+                if step % 50 == 0:  # 50ステップごとにログ
                     print(f"    ステップ {step + 1}/{sim_param.maxStepsPerEpisode}")
                 
-                # SwarmAgentの行動取得
+                # デフォルト行動
                 swarm_actions = {}
-                for swarm_id, agent in swarm_agents.items():
-                    # 学習済みモデルを使用して行動を決定
-                    swarm_observation = env.get_swarm_agent_observation(swarm_id)
-                    action = agent.get_action(swarm_observation)
-                    swarm_actions[swarm_id] = action
+                for swarm_id in swarm_agents.keys():
+                    swarm_actions[swarm_id] = {
+                        'theta': np.random.uniform(0, 2*np.pi),
+                        'th': 0.5,
+                        'k_e': 10.0,
+                        'k_c': 5.0
+                    }
                 
                 # ステップ実行
                 next_state, rewards, done, truncated, info = env.step(swarm_actions)
+                
+                # フレームキャプチャ（GIF生成用）
+                try:
+                    env.capture_frame()
+                except Exception as e:
+                    print(f"    フレームキャプチャエラー（無視）: {e}")
                 
                 # 探査率確認
                 exploration_rate = env.get_exploration_rate()
                 episode_data['final_exploration_rate'] = exploration_rate
                 episode_data['steps_taken'] = step + 1
+                
+                # 詳細なstepデータを記録
+                step_detail = {
+                    'step': step,
+                    'exploration_rate': exploration_rate,
+                    'reward': rewards if isinstance(rewards, (int, float)) else np.mean(list(rewards.values())) if rewards else 0.0,
+                    'done': done,
+                    'truncated': truncated
+                }
+                
+                # 環境から詳細情報を取得
+                if hasattr(env, 'get_exploration_info'):
+                    exploration_info = env.get_exploration_info()
+                    step_detail.update({
+                        'explored_area': exploration_info.get('explored_area', 0),
+                        'total_area': exploration_info.get('total_area', 0),
+                        'new_explored_area': exploration_info.get('new_explored_area', 0)
+                    })
+                
+                # 衝突情報を取得
+                if hasattr(env, 'get_collision_info'):
+                    collision_info = env.get_collision_info()
+                    step_detail.update({
+                        'agent_collision_flag': collision_info.get('agent_collision_flag', 0),
+                        'follower_collision_count': collision_info.get('follower_collision_count', 0)
+                    })
+                
+                # ロボット位置情報を取得（サンプリング）
+                if hasattr(env, 'get_robot_positions') and step % 10 == 0:  # 10ステップごとにサンプリング
+                    robot_positions = env.get_robot_positions()
+                    step_detail['robot_positions'] = robot_positions
+                
+                episode_data['step_details'].append(step_detail)
                 
                 # 目標達成チェック
                 if exploration_rate >= 0.8:
@@ -166,16 +192,20 @@ def run_verification():
                     print(f"    エピソード終了（ステップ {step + 1}）")
                     break
             
+            # エピソード終了時にGIF保存
+            try:
+                env.end_episode(output_dir)
+                print(f"    GIF保存完了")
+            except Exception as e:
+                print(f"    GIF保存エラー（無視）: {e}")
+            
             results.append(episode_data)
             print(f"  エピソード {episode + 1} 完了 - 探査率: {episode_data['final_exploration_rate']:.3f}")
-            
-            # GIF生成のためのエピソード終了処理
-            env.end_episode(output_dir)
         
-        # 8. 結果集計
+        # 7. 結果集計
         print("\n=== 結果集計 ===")
         final_result = {
-            'config': 'Config_B',
+            'config': 'Config_A',
             'environment': {
                 'map_size': f"{sim_param.environment.map.width}x{sim_param.environment.map.height}",
                 'obstacle_density': sim_param.environment.obstacle.probability,
@@ -192,14 +222,14 @@ def run_verification():
             }
         }
         
-        # 9. 結果保存
+        # 8. 結果保存
         result_file = os.path.join(output_dir, "verification_result.json")
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(final_result, f, indent=2, ensure_ascii=False)
         
         print(f"✓ 結果保存完了: {result_file}")
         
-        # 10. 結果表示
+        # 9. 結果表示
         print("\n=== 検証結果 ===")
         print(f"総エピソード数: {final_result['summary']['total_episodes']}")
         print(f"目標達成エピソード数: {final_result['summary']['target_reached_episodes']}")
@@ -215,7 +245,7 @@ def run_verification():
         return False
 
 if __name__ == "__main__":
-    print("=== Config_B 検証開始 (障害物密度: 0.0) ===")
+    print(f"=== 単一障害物密度検証開始 (密度: 0.005) ===")
     print(f"開始時刻: {datetime.now()}")
     
     success = run_verification()
@@ -225,4 +255,4 @@ if __name__ == "__main__":
         print("🎉 検証が正常に完了しました！")
     else:
         print("❌ 検証が失敗しました。")
-        sys.exit(1) 
+        sys.exit(1)

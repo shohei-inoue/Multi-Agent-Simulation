@@ -148,7 +148,8 @@ class ConfigAVerifier:
                 'episode': episode,
                 'exploration_rates': [],
                 'steps_to_target': None,
-                'final_exploration_rate': 0.0
+                'final_exploration_rate': 0.0,
+                'step_details': []  # 詳細なstepデータを追加
             }
             
             # エピソード開始
@@ -168,6 +169,39 @@ class ConfigAVerifier:
                 # データ記録
                 exploration_rate = env.get_exploration_rate()
                 episode_data['exploration_rates'].append(exploration_rate)
+                
+                # 詳細なstepデータを記録
+                step_detail = {
+                    'step': step,
+                    'exploration_rate': exploration_rate,
+                    'reward': reward,
+                    'done': done,
+                    'truncated': truncated
+                }
+                
+                # 環境から詳細情報を取得
+                if hasattr(env, 'get_exploration_info'):
+                    exploration_info = env.get_exploration_info()
+                    step_detail.update({
+                        'explored_area': exploration_info.get('explored_area', 0),
+                        'total_area': exploration_info.get('total_area', 0),
+                        'new_explored_area': exploration_info.get('new_explored_area', 0)
+                    })
+                
+                # 衝突情報を取得
+                if hasattr(env, 'get_collision_info'):
+                    collision_info = env.get_collision_info()
+                    step_detail.update({
+                        'agent_collision_flag': collision_info.get('agent_collision_flag', 0),
+                        'follower_collision_count': collision_info.get('follower_collision_count', 0)
+                    })
+                
+                # ロボット位置情報を取得（サンプリング）
+                if hasattr(env, 'get_robot_positions') and step % 10 == 0:  # 10ステップごとにサンプリング
+                    robot_positions = env.get_robot_positions()
+                    step_detail['robot_positions'] = robot_positions
+                
+                episode_data['step_details'].append(step_detail)
                 
                 # 目標達成チェック
                 if exploration_rate >= config.target_exploration_rate:

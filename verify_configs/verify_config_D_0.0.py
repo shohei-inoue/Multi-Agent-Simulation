@@ -21,7 +21,7 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 3
+    sim_param.episodeNum = 100
     sim_param.maxStepsPerEpisode = 200
     
     # 環境設定
@@ -55,7 +55,14 @@ def setup_config_d_agent():
     
     # SystemAgent設定（学習あり、分岐・統合あり）
     system_param = SystemAgentParam()
-    system_param.learningParameter = LearningParameter()
+    system_param.learningParameter = LearningParameter(
+        type="A2C",
+        model=None,
+        optimizer=None,
+        gamma=0.99,
+        learningLate=0.001,
+        nStep=5
+    )
     system_param.branch_condition.branch_enabled = True
     system_param.integration_condition.integration_enabled = True
     agent_param.system_agent_param = system_param
@@ -63,7 +70,14 @@ def setup_config_d_agent():
     # SwarmAgent設定（学習あり）
     swarm_param = SwarmAgentParam()
     swarm_param.isLearning = True
-    swarm_param.learningParameter = LearningParameter()
+    swarm_param.learningParameter = LearningParameter(
+        type="A2C",
+        model=None,
+        optimizer=None,
+        gamma=0.99,
+        learningLate=0.001,
+        nStep=5
+    )
     agent_param.swarm_agent_params = [swarm_param]
     
     return agent_param
@@ -98,22 +112,58 @@ def run_verification():
         # 5. 学習済みモデルの読み込み
         print("5. 学習済みモデル読み込み中...")
         
+        # 学習済みモデルの入力次元数を使用（学習時と同じ）
+        input_dim = 35  # 学習済みモデルの実際の入力次元数
+        
         # SystemAgentモデル読み込み
-        system_model_path = "trained_models/system_agent_model.h5"
+        system_model_path = "trained_models/config_d/system_agent_model_1.h5"
         if os.path.exists(system_model_path):
-            system_agent.load_model(system_model_path)
+            print(f"  ✅ SystemAgent モデル読み込み中: {system_model_path}")
+            from keras.utils import custom_object_scope
+            from models.system_actor_critic import SystemActorCritic
+            
+            # 学習済みモデルを同じ構造で作成してから重みを読み込み
+            trained_system_model = SystemActorCritic(input_dim)
+            
+            # モデルをビルド（重みを読み込む前に必要）
+            import tensorflow as tf
+            dummy_input = tf.zeros((1, input_dim))
+            _ = trained_system_model(dummy_input)
+            
+            # 重みを読み込み
+            with custom_object_scope({'SystemActorCritic': SystemActorCritic}):
+                trained_system_model.load_weights(system_model_path)
+            
+            system_agent.model = trained_system_model
             print(f"  ✓ SystemAgent モデル読み込み完了")
         else:
             print(f"  ⚠️ SystemAgent モデルファイルが見つかりません: {system_model_path}")
         
         # SwarmAgentモデル読み込み
-        for swarm_id, agent in swarm_agents.items():
-            model_path = f"trained_models/swarm_agent_model_{swarm_id}.h5"
-            if os.path.exists(model_path):
-                agent.load_model(model_path)
+        swarm_model_path = "trained_models/config_d/swarm_agent_model_1.h5"
+        if os.path.exists(swarm_model_path):
+            print(f"  ✅ SwarmAgent モデル読み込み中: {swarm_model_path}")
+            from models.swarm_actor_critic import SwarmActorCritic
+            from keras.utils import custom_object_scope
+            import tensorflow as tf
+            
+            # 学習済みモデルを同じ構造で作成してから重みを読み込み
+            trained_swarm_model = SwarmActorCritic(input_dim)
+            
+            # モデルをビルド（重みを読み込む前に必要）
+            dummy_input = tf.zeros((1, input_dim))
+            _ = trained_swarm_model(dummy_input)
+            
+            # 重みを読み込み
+            with custom_object_scope({'SwarmActorCritic': SwarmActorCritic}):
+                trained_swarm_model.load_weights(swarm_model_path)
+            
+            for swarm_id, agent in swarm_agents.items():
+                agent.model = trained_swarm_model
+                # agent.paramは既に設定済みなので設定不要
                 print(f"  ✓ SwarmAgent {swarm_id} モデル読み込み完了")
-            else:
-                print(f"  ⚠️ SwarmAgent {swarm_id} モデルファイルが見つかりません: {model_path}")
+        else:
+            print(f"  ⚠️ SwarmAgent モデルファイルが見つかりません: {swarm_model_path}")
         
         # 6. SystemAgentを環境に設定
         print("6. SystemAgentを環境に設定中...")
@@ -142,7 +192,8 @@ def run_verification():
                 'episode': episode + 1,
                 'steps_to_target': None,
                 'final_exploration_rate': 0.0,
-                'steps_taken': 0
+                'steps_taken': 0,
+                'step_details': []  # 詳細なstepデータを追加
             }
             
             # ステップ実行
@@ -159,16 +210,76 @@ def run_verification():
                 for swarm_id, agent in swarm_agents.items():
                     # 学習済みモデルを使用して行動を決定
                     swarm_observation = env.get_swarm_agent_observation(swarm_id)
-                    action = agent.get_action(swarm_observation)
+                    action_tuple = agent.get_action(swarm_observation)
+                    # get_actionは(action_dict, action_info_dict)のタプルを返す
+                    action = action_tuple[0] if isinstance(action_tuple, tuple) else action_tuple
                     swarm_actions[swarm_id] = action
                 
-                # ステップ実行
-                next_state, rewards, done, truncated, info = env.step(swarm_actions)
+                # 分岐後に新しいSwarmAgentが必要かチェック
+                current_swarm_ids = [swarm.swarm_id for swarm in env.swarms]
+                for swarm_id in current_swarm_ids:
+                    if swarm_id not in swarm_agents:
+                        print(f"新しいSwarmAgent {swarm_id} を作成中...")
+                        # 新しいSwarmAgentを作成
+                        from agents.agent_factory import create_swarm_agent
+                        new_swarm_agent = create_swarm_agent(
+                            env=env,
+                            param=agent_param.swarm_agent_params[0],  # 同じパラメータを使用
+                            system_agent=system_agent,
+                            swarm_id=swarm_id
+                        )
+                        swarm_agents[swarm_id] = new_swarm_agent
+                        print(f"✓ SwarmAgent {swarm_id} 作成完了")
+                
+                # ステップ実行（actionsを統合）
+                all_actions = {**swarm_actions}  # swarm_actionsをコピー
+                if system_action and isinstance(system_action, dict):  # system_actionが辞書の場合のみ追加
+                    all_actions.update(system_action)
+                next_state, rewards, done, truncated, info = env.step(all_actions)
+                
+                # フレームキャプチャ（明示的に呼び出し）
+                try:
+                    env.capture_frame()
+                except Exception as e:
+                    print(f"    フレームキャプチャエラー（無視）: {e}")
                 
                 # 探査率確認
                 exploration_rate = env.get_exploration_rate()
                 episode_data['final_exploration_rate'] = exploration_rate
                 episode_data['steps_taken'] = step + 1
+                
+                # 詳細なstepデータを記録
+                step_detail = {
+                    'step': step,
+                    'exploration_rate': exploration_rate,
+                    'reward': rewards if isinstance(rewards, (int, float)) else np.mean(list(rewards.values())) if rewards else 0.0,
+                    'done': done,
+                    'truncated': truncated
+                }
+                
+                # 環境から詳細情報を取得
+                if hasattr(env, 'get_exploration_info'):
+                    exploration_info = env.get_exploration_info()
+                    step_detail.update({
+                        'explored_area': exploration_info.get('explored_area', 0),
+                        'total_area': exploration_info.get('total_area', 0),
+                        'new_explored_area': exploration_info.get('new_explored_area', 0)
+                    })
+                
+                # 衝突情報を取得
+                if hasattr(env, 'get_collision_info'):
+                    collision_info = env.get_collision_info()
+                    step_detail.update({
+                        'agent_collision_flag': collision_info.get('agent_collision_flag', 0),
+                        'follower_collision_count': collision_info.get('follower_collision_count', 0)
+                    })
+                
+                # ロボット位置情報を取得（サンプリング）
+                if hasattr(env, 'get_robot_positions') and step % 10 == 0:  # 10ステップごとにサンプリング
+                    robot_positions = env.get_robot_positions()
+                    step_detail['robot_positions'] = robot_positions
+                
+                episode_data['step_details'].append(step_detail)
                 
                 # 目標達成チェック
                 if exploration_rate >= 0.8:

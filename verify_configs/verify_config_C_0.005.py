@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Config_C 検証スクリプト (障害物密度: 0.005)
-System学習なし + Swarm学習なし + 分岐・統合あり
+SystemAgent: 学習あり、分岐・統合あり
+SwarmAgent: 学習なし
 """
 
 import os
@@ -20,7 +21,7 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 3
+    sim_param.episodeNum = 100
     sim_param.maxStepsPerEpisode = 200
     
     # 環境設定
@@ -43,7 +44,7 @@ def setup_verification_environment():
     
     return sim_param
 
-def setup_config_C_agent():
+def setup_config_c_agent():
     """Config_C用エージェント設定"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
@@ -52,17 +53,31 @@ def setup_config_C_agent():
     
     agent_param = AgentParam()
     
-    # SystemAgent設定
+    # SystemAgent設定（学習あり、分岐・統合あり）
     system_param = SystemAgentParam()
-    system_param.learningParameter = None
+    system_param.learningParameter = LearningParameter(
+        type="A2C",
+        model=None,
+        optimizer=None,
+        gamma=0.99,
+        learningLate=0.001,
+        nStep=5
+    )
     system_param.branch_condition.branch_enabled = True
     system_param.integration_condition.integration_enabled = True
     agent_param.system_agent_param = system_param
     
-    # SwarmAgent設定
+    # SwarmAgent設定（学習なし）
     swarm_param = SwarmAgentParam()
     swarm_param.isLearning = False
-    swarm_param.learningParameter = None
+    swarm_param.learningParameter = LearningParameter(
+        type="A2C",
+        model=None,
+        optimizer=None,
+        gamma=0.99,
+        learningLate=0.001,
+        nStep=5
+    )
     agent_param.swarm_agent_params = [swarm_param]
     
     return agent_param
@@ -79,7 +94,7 @@ def run_verification():
         
         # 2. エージェント設定
         print("2. エージェント設定中...")
-        agent_param = setup_config_C_agent()
+        agent_param = setup_config_c_agent()
         print("✓ エージェント設定完了")
         
         # 3. 環境作成
@@ -94,38 +109,33 @@ def run_verification():
         system_agent, swarm_agents = create_initial_agents(env, agent_param)
         print(f"✓ エージェント作成完了 - SwarmAgents: {len(swarm_agents)}")
         
-        # 5. 学習済みモデルの読み込み
-        print("5. 学習済みモデル読み込み中...")
-        # 学習なしのためモデル読み込み不要
-        
-        # 6. SystemAgentを環境に設定
-        print("6. SystemAgentを環境に設定中...")
+        # 5. SystemAgentを環境に設定
+        print("5. SystemAgentを環境に設定中...")
         env.set_system_agent(system_agent)
         print("✓ SystemAgent設定完了")
         
-        # 結果保存用ディレクトリ作成
+        # 6. 結果保存用ディレクトリ作成
         output_dir = "verification_results/Config_C_obstacle_0.005"
         os.makedirs(output_dir, exist_ok=True)
         print(f"✓ 出力ディレクトリ作成: {output_dir}")
         
         # 7. エピソード実行
+        print("7. エピソード実行中...")
         results = []
+        
         for episode in range(sim_param.episodeNum):
-            print(f"\n--- エピソード {episode + 1}/{sim_param.episodeNum} ---")
+            print(f"  📊 エピソード {episode + 1}/{sim_param.episodeNum}")
             
-            # エピソード開始
+            # 環境リセット
+            env.reset()
             env.start_episode(episode)
-            state = env.reset()
-            print(f"  環境リセット完了")
-            
-            # GIF生成のためのフレームキャプチャ開始
-            env.capture_frame()
             
             episode_data = {
                 'episode': episode + 1,
                 'steps_to_target': None,
                 'final_exploration_rate': 0.0,
-                'steps_taken': 0
+                'steps_taken': 0,
+                'step_details': []  # 詳細なstepデータを追加
             }
             
             # ステップ実行
@@ -138,23 +148,80 @@ def run_verification():
                 system_action = system_agent.get_action(system_observation)
                 
                 # SwarmAgentの行動取得
-                swarm_actions = {{}}
+                swarm_actions = {}
                 for swarm_id, agent in swarm_agents.items():
-                    # デフォルト行動（学習なし）
-                    swarm_actions[swarm_id] = {{
-                        'theta': np.random.uniform(0, 2*np.pi),
-                        'th': 0.5,
-                        'k_e': 10.0,
-                        'k_c': 5.0
-                    }}
+                    swarm_observation = env.get_swarm_agent_observation(swarm_id)
+                    action_tuple = agent.get_action(swarm_observation)
+                    action = action_tuple[0] if isinstance(action_tuple, tuple) else action_tuple
+                    swarm_actions[swarm_id] = action
                 
-                # ステップ実行
-                next_state, rewards, done, truncated, info = env.step(swarm_actions)
+                # 分岐後に新しいSwarmAgentが必要かチェック
+                current_swarm_ids = [swarm.swarm_id for swarm in env.swarms]
+                for swarm_id in current_swarm_ids:
+                    if swarm_id not in swarm_agents:
+                        print(f"新しいSwarmAgent {swarm_id} を作成中...")
+                        # 新しいSwarmAgentを作成
+                        from agents.agent_factory import create_swarm_agent
+                        new_swarm_agent = create_swarm_agent(
+                            env=env,
+                            param=agent_param.swarm_agent_params[0],  # 同じパラメータを使用
+                            system_agent=system_agent,
+                            swarm_id=swarm_id
+                        )
+                        swarm_agents[swarm_id] = new_swarm_agent
+                        # SystemAgentに新しいSwarmAgentを登録
+                        system_agent.register_swarm_agent(new_swarm_agent, swarm_id)
+                        print(f"✓ SwarmAgent {swarm_id} 作成完了")
+                
+                # 環境のステップ実行（actionsを統合）
+                all_actions = {**swarm_actions}  # swarm_actionsをコピー
+                if system_action and isinstance(system_action, dict):  # system_actionが辞書の場合のみ追加
+                    all_actions.update(system_action)
+                next_state, rewards, done, truncated, info = env.step(all_actions)
+                
+                # フレームキャプチャ（明示的に呼び出し）
+                try:
+                    env.capture_frame()
+                except Exception as e:
+                    print(f"    フレームキャプチャエラー（無視）: {e}")
                 
                 # 探査率確認
                 exploration_rate = env.get_exploration_rate()
                 episode_data['final_exploration_rate'] = exploration_rate
                 episode_data['steps_taken'] = step + 1
+                
+                # 詳細なstepデータを記録
+                step_detail = {
+                    'step': step,
+                    'exploration_rate': exploration_rate,
+                    'reward': rewards if isinstance(rewards, (int, float)) else np.mean(list(rewards.values())) if rewards else 0.0,
+                    'done': done,
+                    'truncated': truncated
+                }
+                
+                # 環境から詳細情報を取得
+                if hasattr(env, 'get_exploration_info'):
+                    exploration_info = env.get_exploration_info()
+                    step_detail.update({
+                        'explored_area': exploration_info.get('explored_area', 0),
+                        'total_area': exploration_info.get('total_area', 0),
+                        'new_explored_area': exploration_info.get('new_explored_area', 0)
+                    })
+                
+                # 衝突情報を取得
+                if hasattr(env, 'get_collision_info'):
+                    collision_info = env.get_collision_info()
+                    step_detail.update({
+                        'agent_collision_flag': collision_info.get('agent_collision_flag', 0),
+                        'follower_collision_count': collision_info.get('follower_collision_count', 0)
+                    })
+                
+                # ロボット位置情報を取得（サンプリング）
+                if hasattr(env, 'get_robot_positions') and step % 10 == 0:  # 10ステップごとにサンプリング
+                    robot_positions = env.get_robot_positions()
+                    step_detail['robot_positions'] = robot_positions
+                
+                episode_data['step_details'].append(step_detail)
                 
                 # 目標達成チェック
                 if exploration_rate >= 0.8:
@@ -225,4 +292,4 @@ if __name__ == "__main__":
         print("🎉 検証が正常に完了しました！")
     else:
         print("❌ 検証が失敗しました。")
-        sys.exit(1)
+        sys.exit(1) 

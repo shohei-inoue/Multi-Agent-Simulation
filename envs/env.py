@@ -15,7 +15,7 @@ import copy
 from datetime import datetime
 import json
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import pandas as pd
 from envs.env_map import generate_explored_map, generate_rect_obstacle_map
 from .observation_space import create_initial_state
@@ -91,7 +91,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         # GIF作成用のフレーム保存
         self.env_frames = []
         self.current_episode = 0
-        self.frame_interval = 10  # 何ステップごとにフレームを保存するか
+        self.frame_interval = 1  # 毎ステップフレームを保存
         
         # 初期群ID
         self.initial_swarm_id = 1
@@ -1124,6 +1124,9 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         actions: {swarm_id: {"theta": ...}, ...}
         各swarm_agentのアクションをまとめて受け取り、全群のリーダーの行動を一斉に反映する。
         """
+        # agent_stepを更新
+        self._state["agent_step"] += 1
+        
         for swarm_id, action in actions.items():
             theta = action.get("theta")
             swarm = self._find_swarm_by_id(swarm_id)
@@ -1345,6 +1348,9 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         """エピソード開始時の処理"""
         self.current_episode = episode
         self.env_frames = []  # フレームをリセット
+        
+        # agent_stepをリセット
+        self._state["agent_step"] = 0
         
         # 統合されたleaderの軌跡データをリセット
         self.integrated_leader_trajectories = {}
@@ -2073,11 +2079,82 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
 
     def get_exploration_rate(self) -> float:
         """探査率を取得"""
-        if self.explored_map is None:
-            return 0.0
-        total_cells = self.explored_map.shape[0] * self.explored_map.shape[1]
         explored_cells = np.sum(self.explored_map > 0)
+        total_cells = self.__map_width * self.__map_height
         return explored_cells / total_cells if total_cells > 0 else 0.0
+    
+    def get_exploration_info(self) -> Dict[str, Any]:
+        """探査に関する詳細情報を取得"""
+        explored_cells = np.sum(self.explored_map > 0)
+        total_cells = self.__map_width * self.__map_height
+        exploration_rate = explored_cells / total_cells if total_cells > 0 else 0.0
+        
+        # 新しく探査されたエリア数を計算（前ステップとの差分）
+        if hasattr(self, '_previous_explored_cells'):
+            new_explored_cells = explored_cells - self._previous_explored_cells
+        else:
+            new_explored_cells = 0
+        
+        # 現在の探査済みセル数を保存
+        self._previous_explored_cells = explored_cells
+        
+        return {
+            'explored_area': explored_cells,
+            'total_area': total_cells,
+            'exploration_rate': exploration_rate,
+            'new_explored_area': new_explored_cells
+        }
+    
+    def get_collision_info(self) -> Dict[str, Any]:
+        """衝突に関する情報を取得"""
+        agent_collision_flag = 0
+        follower_collision_count = 0
+        
+        # 全ロボットの衝突情報を集計
+        for swarm in self.swarms:
+            # leaderの衝突
+            if hasattr(swarm.leader, 'collision_flag') and swarm.leader.collision_flag:
+                agent_collision_flag = 1
+            
+            # followersの衝突
+            for follower in swarm.followers:
+                if hasattr(follower, 'collision_flag') and follower.collision_flag:
+                    follower_collision_count += 1
+        
+        return {
+            'agent_collision_flag': agent_collision_flag,
+            'follower_collision_count': follower_collision_count
+        }
+    
+    def get_robot_positions(self) -> List[Dict[str, Any]]:
+        """全ロボットの位置情報を取得"""
+        robot_positions = []
+        
+        for swarm in self.swarms:
+            # leaderの位置
+            if hasattr(swarm.leader, 'coordinate'):
+                robot_positions.append({
+                    'robot_id': f"leader_{swarm.swarm_id}",
+                    'swarm_id': swarm.swarm_id,
+                    'role': 'leader',
+                    'x': float(swarm.leader.coordinate[1]),
+                    'y': float(swarm.leader.coordinate[0]),
+                    'collision_flag': getattr(swarm.leader, 'collision_flag', False)
+                })
+            
+            # followersの位置
+            for i, follower in enumerate(swarm.followers):
+                if hasattr(follower, 'coordinate'):
+                    robot_positions.append({
+                        'robot_id': f"follower_{swarm.swarm_id}_{i}",
+                        'swarm_id': swarm.swarm_id,
+                        'role': 'follower',
+                        'x': float(follower.coordinate[1]),
+                        'y': float(follower.coordinate[0]),
+                        'collision_flag': getattr(follower, 'collision_flag', False)
+                    })
+        
+        return robot_positions
 
     # Loggableインターフェースの実装
     def get_log_data(self):
@@ -2332,7 +2409,7 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
 
     def capture_frame(self):
         """現在の状態をフレームとしてキャプチャ"""
-        if self.agent_step % self.frame_interval == 0:
+        if self._state["agent_step"] % self.frame_interval == 0:
             frame = self.render_gif_frame()
             self.env_frames.append(frame)
   

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-簡素化された検証スクリプト
-simple_test.pyの成功した設定を基に作成
+単一障害物密度検証スクリプト (密度: 0.003)
 """
 
 import os
@@ -13,38 +12,38 @@ from datetime import datetime
 # プロジェクトのルートディレクトリをパスに追加
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-def setup_simple_environment():
-    """simple_test.pyと同じ環境設定"""
+def setup_verification_environment():
+    """検証用環境設定"""
     from params.simulation import SimulationParam
     
     sim_param = SimulationParam()
     
-    # 基本設定（小さく設定）
-    sim_param.episodeNum = 2
-    sim_param.maxStepsPerEpisode = 20
+    # 基本設定
+    sim_param.episodeNum = 100  # 並列処理のため3回に削減
+    sim_param.maxStepsPerEpisode = 200
     
-    # 環境設定（小さく設定）
-    sim_param.environment.map.width = 50
-    sim_param.environment.map.height = 50
-    sim_param.environment.obstacle.probability = 0.0
+    # 環境設定
+    sim_param.environment.map.width = 200
+    sim_param.environment.map.height = 100
+    sim_param.environment.obstacle.probability = 0.003
     
-    # 探査設定（少なく設定）
-    sim_param.explore.robotNum = 3
+    # 探査設定
+    sim_param.explore.robotNum = 20
     sim_param.explore.coordinate.x = 10.0
     sim_param.explore.coordinate.y = 10.0
     sim_param.explore.boundary.inner = 0.0
-    sim_param.explore.boundary.outer = 10.0
+    sim_param.explore.boundary.outer = 20.0
     
-    # ログ設定（無効化）
-    sim_param.robot_logging.save_robot_data = False
-    sim_param.robot_logging.save_position = False
-    sim_param.robot_logging.save_collision = False
+    # ログ設定（GIF生成有効）
+    sim_param.robot_logging.save_robot_data = True
+    sim_param.robot_logging.save_position = True
+    sim_param.robot_logging.save_collision = True
     sim_param.robot_logging.sampling_rate = 1.0
     
     return sim_param
 
-def setup_simple_agent_config():
-    """simple_test.pyと同じエージェント設定（Config_A相当）"""
+def setup_config_a_agent():
+    """Config_A用エージェント設定"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
     from params.swarm_agent import SwarmAgentParam
@@ -66,19 +65,19 @@ def setup_simple_agent_config():
     
     return agent_param
 
-def run_simple_verification():
-    """簡素化された検証実行"""
-    print("=== 簡素化された検証開始 ===")
+def run_verification():
+    """検証実行"""
+    print(f"=== Config_A 検証開始 (障害物密度: 0.003) ===")
     
     try:
         # 1. 環境設定
         print("1. 環境設定中...")
-        sim_param = setup_simple_environment()
+        sim_param = setup_verification_environment()
         print("✓ 環境設定完了")
         
         # 2. エージェント設定
         print("2. エージェント設定中...")
-        agent_param = setup_simple_agent_config()
+        agent_param = setup_config_a_agent()
         print("✓ エージェント設定完了")
         
         # 3. 環境作成
@@ -99,7 +98,7 @@ def run_simple_verification():
         print("✓ SystemAgent設定完了")
         
         # 結果保存用ディレクトリ作成
-        output_dir = "simple_verification_results"
+        output_dir = f"verification_results/Config_A_obstacle_0.003"
         os.makedirs(output_dir, exist_ok=True)
         print(f"✓ 出力ディレクトリ作成: {output_dir}")
         
@@ -117,12 +116,13 @@ def run_simple_verification():
                 'episode': episode + 1,
                 'steps_to_target': None,
                 'final_exploration_rate': 0.0,
-                'steps_taken': 0
+                'steps_taken': 0,
+                'step_details': []  # 詳細なstepデータを追加
             }
             
             # ステップ実行
             for step in range(sim_param.maxStepsPerEpisode):
-                if step % 5 == 0:
+                if step % 50 == 0:  # 50ステップごとにログ
                     print(f"    ステップ {step + 1}/{sim_param.maxStepsPerEpisode}")
                 
                 # デフォルト行動
@@ -138,10 +138,49 @@ def run_simple_verification():
                 # ステップ実行
                 next_state, rewards, done, truncated, info = env.step(swarm_actions)
                 
+                # フレームキャプチャ（GIF生成用）
+                try:
+                    env.capture_frame()
+                except Exception as e:
+                    print(f"    フレームキャプチャエラー（無視）: {e}")
+                
                 # 探査率確認
                 exploration_rate = env.get_exploration_rate()
                 episode_data['final_exploration_rate'] = exploration_rate
                 episode_data['steps_taken'] = step + 1
+                
+                # 詳細なstepデータを記録
+                step_detail = {
+                    'step': step,
+                    'exploration_rate': exploration_rate,
+                    'reward': rewards if isinstance(rewards, (int, float)) else np.mean(list(rewards.values())) if rewards else 0.0,
+                    'done': done,
+                    'truncated': truncated
+                }
+                
+                # 環境から詳細情報を取得
+                if hasattr(env, 'get_exploration_info'):
+                    exploration_info = env.get_exploration_info()
+                    step_detail.update({
+                        'explored_area': exploration_info.get('explored_area', 0),
+                        'total_area': exploration_info.get('total_area', 0),
+                        'new_explored_area': exploration_info.get('new_explored_area', 0)
+                    })
+                
+                # 衝突情報を取得
+                if hasattr(env, 'get_collision_info'):
+                    collision_info = env.get_collision_info()
+                    step_detail.update({
+                        'agent_collision_flag': collision_info.get('agent_collision_flag', 0),
+                        'follower_collision_count': collision_info.get('follower_collision_count', 0)
+                    })
+                
+                # ロボット位置情報を取得（サンプリング）
+                if hasattr(env, 'get_robot_positions') and step % 10 == 0:  # 10ステップごとにサンプリング
+                    robot_positions = env.get_robot_positions()
+                    step_detail['robot_positions'] = robot_positions
+                
+                episode_data['step_details'].append(step_detail)
                 
                 # 目標達成チェック
                 if exploration_rate >= 0.8:
@@ -153,13 +192,20 @@ def run_simple_verification():
                     print(f"    エピソード終了（ステップ {step + 1}）")
                     break
             
+            # エピソード終了時にGIF保存
+            try:
+                env.end_episode(output_dir)
+                print(f"    GIF保存完了")
+            except Exception as e:
+                print(f"    GIF保存エラー（無視）: {e}")
+            
             results.append(episode_data)
             print(f"  エピソード {episode + 1} 完了 - 探査率: {episode_data['final_exploration_rate']:.3f}")
         
         # 7. 結果集計
         print("\n=== 結果集計 ===")
         final_result = {
-            'config': 'Config_A_Simple',
+            'config': 'Config_A',
             'environment': {
                 'map_size': f"{sim_param.environment.map.width}x{sim_param.environment.map.height}",
                 'obstacle_density': sim_param.environment.obstacle.probability,
@@ -170,12 +216,14 @@ def run_simple_verification():
                 'total_episodes': len(results),
                 'target_reached_episodes': len([r for r in results if r['steps_to_target'] is not None]),
                 'average_exploration_rate': np.mean([r['final_exploration_rate'] for r in results]),
-                'average_steps_taken': np.mean([r['steps_taken'] for r in results])
+                'average_steps_taken': np.mean([r['steps_taken'] for r in results]),
+                'std_exploration_rate': np.std([r['final_exploration_rate'] for r in results]),
+                'std_steps_taken': np.std([r['steps_taken'] for r in results])
             }
         }
         
         # 8. 結果保存
-        result_file = os.path.join(output_dir, "simple_verification_result.json")
+        result_file = os.path.join(output_dir, "verification_result.json")
         with open(result_file, 'w', encoding='utf-8') as f:
             json.dump(final_result, f, indent=2, ensure_ascii=False)
         
@@ -185,8 +233,8 @@ def run_simple_verification():
         print("\n=== 検証結果 ===")
         print(f"総エピソード数: {final_result['summary']['total_episodes']}")
         print(f"目標達成エピソード数: {final_result['summary']['target_reached_episodes']}")
-        print(f"平均探査率: {final_result['summary']['average_exploration_rate']:.3f}")
-        print(f"平均ステップ数: {final_result['summary']['average_steps_taken']:.1f}")
+        print(f"平均探査率: {final_result['summary']['average_exploration_rate']:.3f} ± {final_result['summary']['std_exploration_rate']:.3f}")
+        print(f"平均ステップ数: {final_result['summary']['average_steps_taken']:.1f} ± {final_result['summary']['std_steps_taken']:.1f}")
         
         return True
         
@@ -196,12 +244,11 @@ def run_simple_verification():
         traceback.print_exc()
         return False
 
-def main():
-    """メイン実行関数"""
-    print("=== 簡素化された検証スクリプト開始 ===")
+if __name__ == "__main__":
+    print(f"=== 単一障害物密度検証開始 (密度: 0.003) ===")
     print(f"開始時刻: {datetime.now()}")
     
-    success = run_simple_verification()
+    success = run_verification()
     
     print(f"\n終了時刻: {datetime.now()}")
     if success:
@@ -209,6 +256,3 @@ def main():
     else:
         print("❌ 検証が失敗しました。")
         sys.exit(1)
-
-if __name__ == "__main__":
-    main() 

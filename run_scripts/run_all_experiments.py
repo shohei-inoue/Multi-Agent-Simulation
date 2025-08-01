@@ -36,10 +36,23 @@ def main():
     
     # 1. 学習実行
     print("\n📚 ステップ1: モデル学習")
-    success = run_command("python3 train_models.py", "モデル学習")
-    if not success:
-        print("❌ 学習に失敗しました。処理を中止します。")
-        return False
+    
+    # 各Configの学習を順次実行
+    train_scripts = [
+        "train_configs/train_config_b.py",
+        "train_configs/train_config_c.py", 
+        "train_configs/train_config_d.py"
+    ]
+    
+    for script in train_scripts:
+        if os.path.exists(script):
+            print(f"  学習スクリプト実行: {script}")
+            success = run_command(f"python3 {script}", f"学習実行: {script}")
+            if not success:
+                print(f"❌ {script} の学習に失敗しました。")
+                return False
+        else:
+            print(f"⚠️ 学習スクリプトが見つかりません: {script}")
     
     # 学習完了確認
     if not os.path.exists("trained_models"):
