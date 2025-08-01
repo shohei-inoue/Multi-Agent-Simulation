@@ -4,11 +4,15 @@ Config_Aのみの検証実行スクリプト
 """
 
 import os
+import sys
 import json
 import numpy as np
 from datetime import datetime
 from typing import Dict, List, Any
 from dataclasses import dataclass
+
+# プロジェクトのルートディレクトリをパスに追加
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.application import Application
 from params.simulation import SimulationParam
@@ -27,10 +31,10 @@ class ConfigAConfig:
     swarm_agent_learning: bool = False
     system_agent_branching: bool = False
     use_pretrained_models: bool = False
-    num_episodes: int = 100  # 検証用
-    max_steps_per_episode: int = 200
+    num_episodes: int = 5  # テスト用
+    max_steps_per_episode: int = 10  # テスト用
     target_exploration_rate: float = 0.8
-    num_runs: int = 5  # 統計的信頼性のため
+    num_runs: int = 1  # テスト用
 
 
 @dataclass

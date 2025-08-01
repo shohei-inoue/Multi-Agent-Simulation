@@ -6,6 +6,8 @@ Implements the core simulation environment with rendering and logging capabiliti
 import gym
 import numpy as np
 import math
+import matplotlib
+matplotlib.use('Agg')  # 非インタラクティブバックエンドを使用
 import matplotlib.pyplot as plt
 import matplotlib.colors as mColors
 from matplotlib.patches import Circle
@@ -786,34 +788,21 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
           # rgb_arrayを取得
           fig.canvas.draw()
           
-          # matplotlibのバージョンに応じて適切なメソッドを使用
-          try:
-              # 新しいmatplotlibバージョン用
-              img_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)  # type: ignore
-              img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-          except (AttributeError, TypeError):
-              try:
-                  # 代替方法1: buffer_rgbaを使用
-                  img_array = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)  # type: ignore
-                  img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
-                  img_array = img_array[:, :, :3]  # アルファチャンネルを除去
-              except (AttributeError, TypeError):
-                  # 代替方法2: savefigを使用して一時ファイルから読み込み
-                  import tempfile
-                  import io
-                  from PIL import Image
-                  
-                  # 一時ファイルに保存
-                  with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                      fig.savefig(tmp_file.name, format='png', bbox_inches='tight', dpi=100)
-                      
-                      # PILで読み込み
-                      img = Image.open(tmp_file.name)
-                      img_array = np.array(img)
-                      
-                      # 一時ファイルを削除
-                      import os
-                      os.unlink(tmp_file.name)
+          # より堅牢な方法: 一時ファイルを使用して画像を生成
+          import tempfile
+          import os
+          from PIL import Image
+          
+          # 一時ファイルに保存
+          with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+              fig.savefig(tmp_file.name, format='png', bbox_inches='tight', dpi=100)
+              
+              # PILで読み込み
+              img = Image.open(tmp_file.name)
+              img_array = np.array(img)
+              
+              # 一時ファイルを削除
+              os.unlink(tmp_file.name)
           
           plt.close(fig)  # メモリリーク防止
           plt.clf()  # 追加のクリーンアップ
@@ -2355,44 +2344,23 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         target_height = int(target_width * (self.__map_height / self.__map_width))
         
         try:
-            # キャンバスから画像データを取得
-            buf = fig.canvas.tostring_rgb()
-            frame = np.frombuffer(buf, dtype=np.uint8)
+            # より堅牢な方法: 一時ファイルを使用して画像を生成
+            import tempfile
+            import os
+            from PIL import Image
             
-            # 実際のキャンバスサイズを取得
-            canvas_width, canvas_height = fig.canvas.get_width_height()
-            actual_size = canvas_width * canvas_height * 3
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                fig.savefig(tmp_file.name, dpi=100, bbox_inches='tight', pad_inches=0)
+                tmp_path = tmp_file.name
             
-            if len(frame) == actual_size:
-                # 正しいサイズの場合、リシェイプしてリサイズ
-                frame = frame.reshape((canvas_height, canvas_width, 3))
-                
-                # PILを使用してリサイズ
-                from PIL import Image
-                img = Image.fromarray(frame)
-                img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                frame = np.array(img)
-            else:
-                # サイズが合わない場合は、代替方法を試す
-                print(f"Warning: Frame size mismatch. Expected {actual_size}, got {len(frame)}")
-                
-                # 代替方法: 保存して読み込み
-                import tempfile
-                import os
-                
-                # 一時ファイルに保存
-                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
-                    fig.savefig(tmp_file.name, dpi=100, bbox_inches='tight', pad_inches=0)
-                    tmp_path = tmp_file.name
-                
-                # PILで読み込み
-                from PIL import Image
-                img = Image.open(tmp_path)
-                img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
-                frame = np.array(img)
-                
-                # 一時ファイルを削除
-                os.unlink(tmp_path)
+            # PILで読み込み
+            img = Image.open(tmp_path)
+            img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+            frame = np.array(img)
+            
+            # 一時ファイルを削除
+            os.unlink(tmp_path)
                 
         except Exception as e:
             print(f"Error in frame generation: {e}")
