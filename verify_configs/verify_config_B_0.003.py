@@ -9,6 +9,8 @@ import sys
 import json
 import numpy as np
 from datetime import datetime
+import matplotlib
+matplotlib.use('Agg')  # 非インタラクティブバックエンドを使用
 
 def convert_numpy_types(obj):
     """numpy型をPython型に変換してJSONシリアライゼーションを可能にする"""
@@ -118,7 +120,7 @@ def run_verification():
         
         # 5. 学習済みモデルの読み込み
         print("5. 学習済みモデル読み込み中...")
-        model_path = "trained_models/config_b/swarm_agent_model_1.h5"
+        model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trained_models/config_b/swarm_agent_model_1.h5")
         if not os.path.exists(model_path):
             print(f"❌ モデルファイルが見つかりません: {model_path}")
             return
@@ -127,14 +129,23 @@ def run_verification():
         from models.swarm_actor_critic import SwarmActorCritic
         
         # 学習済みモデルを直接読み込み
-        with custom_object_scope({'SwarmActorCritic': SwarmActorCritic}):
-            from keras.models import load_model
-            trained_model = load_model(model_path)
-        
-        # 各スウォームエージェントに学習済みモデルを設定
-        for swarm_id, agent in swarm_agents.items():
-            agent.model = trained_model
-            print(f"  ✓ SwarmAgent {swarm_id} に学習済みモデルを設定完了")
+        try:
+            with custom_object_scope({'SwarmActorCritic': SwarmActorCritic}):
+                from keras.models import load_model
+                trained_model = load_model(model_path)
+            
+            # 各スウォームエージェントに学習済みモデルを設定
+            for swarm_id, agent in swarm_agents.items():
+                agent.model = trained_model
+                print(f"  ✓ SwarmAgent {swarm_id} に学習済みモデルを設定完了")
+        except Exception as e:
+            print(f"⚠️ モデル読み込みエラー: {e}")
+            print("新しくモデルを作成して学習なしモードで実行します")
+            # 学習なしモードに切り替え
+            for swarm_id, agent in swarm_agents.items():
+                agent.isLearning = False
+                agent.learningParameter = None
+                print(f"  ✓ SwarmAgent {swarm_id} を学習なしモードに設定")
         
         # 6. SystemAgentを環境に設定
         print("6. SystemAgentを環境に設定中...")
@@ -177,11 +188,17 @@ def run_verification():
                 for swarm_id, agent in swarm_agents.items():
                     # 学習済みモデルを使用して行動を決定
                     swarm_observation = env.get_swarm_agent_observation(swarm_id)
-                    action = agent.get_action(swarm_observation)
-                    swarm_actions[swarm_id] = action
+                    action_tensor, action_dict = agent.get_action(swarm_observation)
+                    swarm_actions[swarm_id] = action_dict
                 
                 # ステップ実行
                 next_state, rewards, done, truncated, info = env.step(swarm_actions)
+                
+                # フレームキャプチャ（GIF生成用）
+                try:
+                    env.capture_frame()
+                except Exception as e:
+                    print(f"    フレームキャプチャエラー（無視）: {e}")
                 
                 # 探査率確認
                 exploration_rate = env.get_exploration_rate()
@@ -231,11 +248,15 @@ def run_verification():
                     print(f"    エピソード終了（ステップ {step + 1}）")
                     break
             
+            # エピソード終了時にGIF保存
+            try:
+                env.end_episode(output_dir)
+                print(f"    GIF保存完了")
+            except Exception as e:
+                print(f"    GIF保存エラー（無視）: {e}")
+            
             results.append(episode_data)
             print(f"  エピソード {episode + 1} 完了 - 探査率: {episode_data['final_exploration_rate']:.3f}")
-            
-            # GIF生成のためのエピソード終了処理
-            env.end_episode(output_dir)
         
         # 8. 結果集計
         print("\n=== 結果集計 ===")

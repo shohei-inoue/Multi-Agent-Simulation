@@ -10,6 +10,8 @@ import sys
 import json
 import numpy as np
 from datetime import datetime
+import matplotlib
+matplotlib.use('Agg')  # 非インタラクティブバックエンドを使用
 
 def convert_numpy_types(obj):
     """numpy型をPython型に変換してJSONシリアライゼーションを可能にする"""
@@ -166,9 +168,8 @@ def run_verification():
                 swarm_actions = {}
                 for swarm_id, agent in swarm_agents.items():
                     swarm_observation = env.get_swarm_agent_observation(swarm_id)
-                    action_tuple = agent.get_action(swarm_observation)
-                    action = action_tuple[0] if isinstance(action_tuple, tuple) else action_tuple
-                    swarm_actions[swarm_id] = action
+                    action_tensor, action_dict = agent.get_action(swarm_observation)
+                    swarm_actions[swarm_id] = action_dict
                 
                 # 分岐後に新しいSwarmAgentが必要かチェック
                 current_swarm_ids = [swarm.swarm_id for swarm in env.swarms]
@@ -248,11 +249,15 @@ def run_verification():
                     print(f"    エピソード終了（ステップ {step + 1}）")
                     break
             
+            # エピソード終了時にGIF保存
+            try:
+                env.end_episode(output_dir)
+                print(f"    GIF保存完了")
+            except Exception as e:
+                print(f"    GIF保存エラー（無視）: {e}")
+            
             results.append(episode_data)
             print(f"  エピソード {episode + 1} 完了 - 探査率: {episode_data['final_exploration_rate']:.3f}")
-            
-            # GIF生成のためのエピソード終了処理
-            env.end_episode(output_dir)
         
         # 8. 結果集計
         print("\n=== 結果集計 ===")
