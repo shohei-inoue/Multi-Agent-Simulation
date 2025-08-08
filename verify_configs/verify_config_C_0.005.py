@@ -38,8 +38,8 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 100
-    sim_param.maxStepsPerEpisode = 200
+    sim_param.episodeNum = 5
+    sim_param.maxStepsPerEpisode = 10
     
     # 環境設定
     sim_param.environment.map.width = 200

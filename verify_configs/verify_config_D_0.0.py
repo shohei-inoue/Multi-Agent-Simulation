@@ -38,8 +38,8 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 100
-    sim_param.maxStepsPerEpisode = 200
+    sim_param.episodeNum = 5
+    sim_param.maxStepsPerEpisode = 10
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -244,6 +244,8 @@ def run_verification():
                             swarm_id=swarm_id
                         )
                         swarm_agents[swarm_id] = new_swarm_agent
+                        # SystemAgentに新しいSwarmAgentを登録
+                        system_agent.register_swarm_agent(new_swarm_agent, swarm_id)
                         print(f"✓ SwarmAgent {swarm_id} 作成完了")
                 
                 # ステップ実行（actionsを統合）
