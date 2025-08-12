@@ -157,9 +157,30 @@ def run_verification():
         for episode in range(sim_param.episodeNum):
             print(f"  📊 エピソード {episode + 1}/{sim_param.episodeNum}")
             
-            # 環境リセット
-            env.reset()
+            # エピソード開始時の状態初期化
+            if episode > 0:  # 2エピソード目以降
+                print(f"    🔄 エピソード間状態初期化中...")
+                
+                # SystemAgentの状態を初期化
+                system_agent.next_swarm_id = 1  # 群IDをリセット
+                system_agent.current_swarm_count = 0  # 群数をリセット
+                system_agent.swarm_agents.clear()  # 登録された群エージェントをクリア
+                
+                # 既存のSwarmAgentをクリア
+                swarm_agents.clear()
+                
+                # 新しいエージェントを作成（エピソード1と同様）
+                from agents.agent_factory import create_initial_agents
+                system_agent, swarm_agents = create_initial_agents(env, agent_param)
+                
+                # SystemAgentを環境に再設定
+                env.set_system_agent(system_agent)
+                
+                print(f"    ✓ 状態初期化完了 - SwarmAgents: {len(swarm_agents)}")
+            
+            # 環境リセット（main.pyと同様の順序）
             env.start_episode(episode)
+            state = env.reset()
             
             episode_data = {
                 'episode': episode + 1,
@@ -174,16 +195,42 @@ def run_verification():
                 if step % 20 == 0:  # 20ステップごとにログ
                     print(f"    ステップ {step + 1}/{sim_param.maxStepsPerEpisode}")
                 
+                # 各SwarmAgentの行動取得（main.pyと同様の順序）
+                swarm_actions = {}
+                for swarm_id, agent in swarm_agents.items():
+                    # env.swarmsから該当する群を探す
+                    swarm_exists = any(swarm.swarm_id == swarm_id for swarm in env.swarms)
+                    if swarm_exists:  # 存在する群のみ
+                        # 適切な状態を取得（main.pyと同様）
+                        swarm_observation = env.get_swarm_agent_observation(swarm_id)
+                        action_tensor, action_dict = agent.get_action(swarm_observation)
+                        swarm_actions[swarm_id] = action_dict
+                    else:
+                        if step == 0:
+                            print(f"    Swarm {swarm_id} not found in env.swarms")
+                
                 # SystemAgentの行動取得（分岐・統合判断）
                 system_observation = env.get_system_agent_observation()
                 system_action = system_agent.get_action(system_observation)
                 
-                # SwarmAgentの行動取得
-                swarm_actions = {}
-                for swarm_id, agent in swarm_agents.items():
-                    swarm_observation = env.get_swarm_agent_observation(swarm_id)
-                    action_tensor, action_dict = agent.get_action(swarm_observation)
-                    swarm_actions[swarm_id] = action_dict
+                # SystemAgentのアクションを実行（分岐・統合処理）
+                if system_action and isinstance(system_action, dict):
+                    action_type = system_action.get('action_type', 0)
+                    target_swarm_id = system_action.get('target_swarm_id', 0)
+                    
+                    if action_type == 1:  # 分岐
+                        print(f"    🔀 分岐処理実行: swarm {target_swarm_id}")
+                        # 分岐処理を実行
+                        system_agent._execute_branch({
+                            'swarm_id': target_swarm_id,
+                            'valid_directions': [0, 45, 90, 135, 180, 225, 270, 315]  # デフォルトの方向
+                        })
+                    elif action_type == 2:  # 統合
+                        print(f"    🔗 統合処理実行: swarm {target_swarm_id}")
+                        # 統合処理を実行
+                        system_agent._execute_integration({
+                            'swarm_id': target_swarm_id
+                        })
                 
                 # 分岐後に新しいSwarmAgentが必要かチェック
                 current_swarm_ids = [swarm.swarm_id for swarm in env.swarms]
@@ -266,6 +313,16 @@ def run_verification():
                 
                 if done or truncated:
                     print(f"    エピソード終了（ステップ {step + 1}）")
+                    break
+                
+                # デバッグ情報: エピソード終了条件の確認
+                if step % 10 == 0:  # 10ステップごとに確認
+                    print(f"    🔍 デバッグ: Step {step + 1}, exploration_rate={exploration_rate:.3f}, done={done}, truncated={truncated}")
+                    print(f"    🔍 デバッグ: 目標達成条件={exploration_rate >= 0.8}, 環境終了条件={done or truncated}")
+                
+                # 無限ループ防止: 最大ステップ数に達した場合
+                if step >= sim_param.maxStepsPerEpisode - 1:
+                    print(f"    ⚠️ 最大ステップ数に到達（Step {step + 1}）")
                     break
             
             # エピソード終了時にGIF保存

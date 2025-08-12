@@ -1473,7 +1473,8 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                 follower_collision_data.extend(collision_data)
                 
                 # followerのmobility_score
-                follower_mobility_scores.append(follower.mobility_score)
+                mobility_score = follower.mobility_score
+                follower_mobility_scores.append(mobility_score)
         
         # follower_mobility_scoresのパディング
         MAX_ROBOT_NUM = 10

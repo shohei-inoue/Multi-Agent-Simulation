@@ -49,6 +49,15 @@ class SwarmAgent(BaseAgent):
             follower_count = len(follower_scores)
             avg_mobility = np.mean(follower_scores) if follower_count > 0 else 0.0
             
+            # デバッグ情報を詳細に出力
+            print(f"🔍 SwarmAgent {self.swarm_id}（学習なし）: follower_scores詳細分析")
+            print(f"   - follower_scores: {follower_scores}")
+            print(f"   - follower_count: {follower_count}")
+            print(f"   - avg_mobility: {avg_mobility:.6f}")
+            print(f"   - 各スコアの詳細:")
+            for i, score in enumerate(follower_scores):
+                print(f"     [{i}]: {score:.6f}")
+            
             print(f"📊 SwarmAgent {self.swarm_id}（学習なし）: follower_scores={follower_scores}, follower_count={follower_count}, avg_mobility={avg_mobility:.3f}, valid_directions={len(valid_directions)}")
             
             # SystemAgentから閾値を取得

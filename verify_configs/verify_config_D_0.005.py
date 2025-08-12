@@ -165,6 +165,18 @@ def run_verification():
         for episode in range(sim_param.episodeNum):
             print(f"\n--- エピソード {episode + 1}/{sim_param.episodeNum} ---")
             
+            # エピソード2以降で状態初期化
+            if episode > 0:  # 2エピソード目以降
+                print(f"    🔄 エピソード間状態初期化中...")
+                system_agent.next_swarm_id = 1
+                system_agent.current_swarm_count = 0
+                system_agent.swarm_agents.clear()
+                swarm_agents.clear()
+                from agents.agent_factory import create_initial_agents
+                system_agent, swarm_agents = create_initial_agents(env, agent_param)
+                env.set_system_agent(system_agent)
+                print(f"    ✓ 状態初期化完了 - SwarmAgents: {len(swarm_agents)}")
+            
             # エピソード開始
             env.start_episode(episode)
             state = env.reset()
@@ -189,6 +201,17 @@ def run_verification():
                 # SystemAgentの行動取得（分岐・統合判断）
                 system_observation = env.get_system_agent_observation()
                 system_action = system_agent.get_action(system_observation)
+                
+                # SystemAgentの分岐・統合処理を実行
+                if system_action and isinstance(system_action, dict):
+                    action_type = system_action.get('action_type', 0)
+                    target_swarm_id = system_action.get('target_swarm_id', 0)
+                    if action_type == 1:  # 分岐
+                        print(f"    🔀 分岐処理実行: swarm {target_swarm_id}")
+                        system_agent._execute_branch({'swarm_id': target_swarm_id, 'valid_directions': [0, 45, 90, 135, 180, 225, 270, 315]})
+                    elif action_type == 2:  # 統合
+                        print(f"    🔗 統合処理実行: swarm {target_swarm_id}")
+                        system_agent._execute_integration({'swarm_id': target_swarm_id})
                 
                 # SwarmAgentの行動取得
                 swarm_actions = {}

@@ -122,6 +122,27 @@ def run_verification():
         for episode in range(sim_param.episodeNum):
             print(f"\n--- エピソード {episode + 1}/{sim_param.episodeNum} ---")
             
+            # エピソード開始時の状態初期化
+            if episode > 0:  # 2エピソード目以降
+                print(f"  🔄 エピソード間状態初期化中...")
+                
+                # SystemAgentの状態を初期化
+                system_agent.next_swarm_id = 1  # 群IDをリセット
+                system_agent.current_swarm_count = 0  # 群数をリセット
+                system_agent.swarm_agents.clear()  # 登録された群エージェントをクリア
+                
+                # 既存のSwarmAgentをクリア
+                swarm_agents.clear()
+                
+                # 新しいエージェントを作成（エピソード1と同様）
+                from agents.agent_factory import create_initial_agents
+                system_agent, swarm_agents = create_initial_agents(env, agent_param)
+                
+                # SystemAgentを環境に再設定
+                env.set_system_agent(system_agent)
+                
+                print(f"  ✓ 状態初期化完了 - SwarmAgents: {len(swarm_agents)}")
+            
             # エピソード開始
             env.start_episode(episode)
             state = env.reset()
@@ -140,14 +161,44 @@ def run_verification():
                 if step % 50 == 0:  # 50ステップごとにログ
                     print(f"    ステップ {step + 1}/{sim_param.maxStepsPerEpisode}")
                 
-                # VFH-Fuzzyアルゴリズムを使用した行動決定
+                # 各SwarmAgentの行動取得（main.pyと同様の順序）
                 swarm_actions = {}
                 for swarm_id, swarm_agent in swarm_agents.items():
-                    # VFH-Fuzzyアルゴリズムで行動決定
-                    action, action_info = swarm_agent.get_action(state)
-                    swarm_actions[swarm_id] = action
+                    # env.swarmsから該当する群を探す
+                    swarm_exists = any(swarm.swarm_id == swarm_id for swarm in env.swarms)
+                    if swarm_exists:  # 存在する群のみ
+                        # 適切な状態を取得（main.pyと同様）
+                        swarm_observation = env.get_swarm_agent_observation(swarm_id)
+                        action, action_info = swarm_agent.get_action(swarm_observation)
+                        swarm_actions[swarm_id] = action
+                    else:
+                        if step == 0:
+                            print(f"    Swarm {swarm_id} not found in env.swarms")
                 
-                # ステップ実行
+                # SystemAgentの行動取得と実行（分岐・統合判断）
+                system_observation = env.get_system_agent_observation()
+                system_action = system_agent.get_action(system_observation)
+                
+                # SystemAgentのアクションを実行（分岐・統合処理）
+                if system_action and isinstance(system_action, dict):
+                    action_type = system_action.get('action_type', 0)
+                    target_swarm_id = system_action.get('target_swarm_id', 0)
+                    
+                    if action_type == 1:  # 分岐
+                        print(f"    🔀 分岐処理実行: swarm {target_swarm_id}")
+                        # 分岐処理を実行
+                        system_agent._execute_branch({
+                            'swarm_id': target_swarm_id,
+                            'valid_directions': [0, 45, 90, 135, 180, 225, 270, 315]  # デフォルトの方向
+                        })
+                    elif action_type == 2:  # 統合
+                        print(f"    🔗 統合処理実行: swarm {target_swarm_id}")
+                        # 統合処理を実行
+                        system_agent._execute_integration({
+                            'swarm_id': target_swarm_id
+                        })
+                
+                # 環境のステップ実行
                 next_state, rewards, done, truncated, info = env.step(swarm_actions)
                 
                 # フレームキャプチャ（GIF生成用）
