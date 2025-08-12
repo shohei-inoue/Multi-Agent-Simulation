@@ -9,8 +9,8 @@ from scipy.special import i0
 
 class AlgorithmVfhFuzzy():
   KAPPA         = 1.0                                                 # 逆温度
-  BIN_SIZE_DEG  = 20                                                  # ビンのサイズ(度)
-  BIN_NUM       = int(360 // BIN_SIZE_DEG)                            # ビン数
+  BIN_SIZE_DEG  = 10                                                  # ビンのサイズ(度) - 360/36=10度
+  BIN_NUM       = 36                                                  # ビン数
   ANGLES        = np.linspace(0, 2 * np.pi, BIN_NUM, endpoint=False)  # 角度
 
 
@@ -50,7 +50,7 @@ class AlgorithmVfhFuzzy():
     self.last_collision_theta = None  # 前回衝突した方向
     
     # ヒストグラム
-    self.BIN_NUM = 72
+    self.BIN_NUM = 36
     self.BIN_SIZE_DEG = 360 // self.BIN_NUM
     self.ANGLES = np.linspace(0, 2 * np.pi, self.BIN_NUM, endpoint=False)
     
@@ -257,12 +257,46 @@ class AlgorithmVfhFuzzy():
         self.follower_collision_data = []
         for i in range(0, len(value), 2):
             if i + 1 < len(value):
-                self.follower_collision_data.append((value[i], value[i + 1]))
+                azimuth = value[i]
+                distance = value[i + 1]
+                
+                # データ型チェック
+                if (isinstance(azimuth, (int, float, np.number)) and 
+                    isinstance(distance, (int, float, np.number))):
+                    self.follower_collision_data.append((azimuth, distance))
+                else:
+                    print(f"[WARNING] Skipping invalid collision data: azimuth={azimuth} ({type(azimuth)}), distance={distance} ({type(distance)})")
+    else:
+        self.follower_collision_data = []
     
     # 衝突フラグが立っている場合、前回の方向を衝突方向として記録
-    if self.agent_collision_flag and self.last_theta is not None:
-        self.last_collision_theta = self.last_theta
-        print(f"[COLLISION] Recording collision direction: {np.rad2deg(self.last_collision_theta):.1f}°")
+    if self.agent_collision_flag:
+        if self.last_theta is not None:
+            self.last_collision_theta = self.last_theta
+            print(f"[COLLISION] Recording collision direction: {np.rad2deg(self.last_collision_theta):.1f}°")
+        else:
+            # last_thetaがまだない場合は、現在の方位を衝突方向として記録
+            if self.agent_azimuth is not None:
+                self.last_collision_theta = self.agent_azimuth
+                print(f"[COLLISION] Recording collision direction (from azimuth): {np.rad2deg(self.last_collision_theta):.1f}°")
+    else:
+        # 衝突フラグが立っていない場合は、数ステップ後に衝突方向をリセット
+        # これにより、一時的な回避から徐々に通常の行動に戻る
+        if self.last_collision_theta is not None:
+            # 衝突方向の記憶を徐々に薄くする（時間経過による忘却）
+            if not hasattr(self, '_collision_reset_counter'):
+                self._collision_reset_counter = 0
+            self._collision_reset_counter += 1
+            
+            # 10ステップ後に衝突方向をリセット
+            if self._collision_reset_counter >= 10:
+                self.last_collision_theta = None
+                self._collision_reset_counter = 0
+                print(f"[RESET] Collision direction reset after 10 steps")
+        else:
+            # 衝突方向がリセットされている場合はカウンターもリセット
+            if hasattr(self, '_collision_reset_counter'):
+                self._collision_reset_counter = 0
 
 
   # def get_obstacle_density_histogram(self):
@@ -284,67 +318,81 @@ class AlgorithmVfhFuzzy():
 
   def get_obstacle_density_histogram(self):
     """
-    障害物密度ヒストグラムを計算
+    障害物密度ヒストグラムを計算（改善版）
+    フォロワーの衝突データを使用し、衝突方向は一時的に回避するが完全には遮断しない
     """
-    histogram = np.zeros(self.BIN_NUM)
+    # 基本ヒストグラムを初期化（全方向1.0）
+    histogram = np.ones(self.BIN_NUM, dtype=np.float32)
     
-    # 前回衝突した方向を避ける
+    # 前回衝突した方向を一時的に回避（完全遮断ではなく確率調整）
     if self.last_collision_theta is not None:
-        # 前回衝突した方向の周辺を低評価
         collision_bin = int(self.last_collision_theta * self.BIN_NUM / (2 * np.pi)) % self.BIN_NUM
+        avoided_bins = 0
+        
         for i in range(self.BIN_NUM):
-            # 前回衝突した方向から離れるほど高評価
+            # 前回衝突した方向からの距離を計算
             distance = min(abs(i - collision_bin), abs(i - collision_bin + self.BIN_NUM), abs(i - collision_bin - self.BIN_NUM))
-            if distance < 8:  # 前回衝突した方向の周辺8binを低評価
-                histogram[i] = 0.05  # より低い評価
+            
+            if distance < 4:  # 衝突方向周辺4bin（40度範囲）
+                # 完全に遮断せず、確率を下げる
+                histogram[i] = 0.3  # 0.05から0.3に改善（完全遮断を回避）
+                avoided_bins += 1
+            elif distance < 8:  # 衝突方向周辺8bin（80度範囲）
+                # 中程度の確率調整
+                histogram[i] = 0.7
             else:
+                # 遠い方向は通常の確率
                 histogram[i] = 1.0
-        print(f"[AVOIDANCE] Avoiding collision direction: {np.rad2deg(self.last_collision_theta):.1f}°")
+        
+        print(f"[AVOIDANCE] Temporarily reducing probability for collision direction: {np.rad2deg(self.last_collision_theta):.1f}° (reduced {avoided_bins} bins)")
     
-    # 各方向の障害物密度を計算
-    if self.env is not None and hasattr(self.env, 'explored_map') and self.env.explored_map is not None:
-        for i in range(self.BIN_NUM):
-            angle = 2 * np.pi * i / self.BIN_NUM
-            obstacle_count = 0
-            total_count = 0
+    # フォロワーの衝突データによる障害物密度調整
+    for azimuth, distance in self.follower_collision_data:
+        # データ型チェックとエラーハンドリング
+        try:
+            # distanceが配列の場合は最初の要素を使用
+            if hasattr(distance, '__len__') and len(distance) > 0:
+                distance = distance[0]
             
-            # スキャン範囲を設定
-            scan_distance = 10
+            # 数値チェック
+            if not isinstance(distance, (int, float, np.number)) or distance < 1e-6:
+                continue  # 無効データ（0埋めなど）はスキップ
+
+            azimuth_deg = azimuth % 360.0
+            bin_index = int(azimuth_deg) // self.BIN_SIZE_DEG
             
-            for distance in range(1, scan_distance + 1):
-                check_x = int(self.agent_coordinate_x + distance * np.cos(angle))
-                check_y = int(self.agent_coordinate_y + distance * np.sin(angle))
-                
-                if (0 <= check_y < self.env.explored_map.shape[0] and 
-                    0 <= check_x < self.env.explored_map.shape[1]):
-                    total_count += 1
-                    if self.env.explored_map[check_y, check_x] == 1000:  # 障害物値
-                        obstacle_count += 1
-            
-            if total_count > 0:
-                obstacle_ratio = obstacle_count / total_count
-                # 障害物密度が高いほど低評価
-                histogram[i] *= (1.0 - obstacle_ratio)
+            # 距離に基づいて障害物密度を計算（近いほど危険）
+            obstacle_weight = 1.0 / (distance + 1e-3)
+            histogram[bin_index] = max(0.1, histogram[bin_index] - obstacle_weight)  # 最低値0.1を保証
+        except (TypeError, ValueError, IndexError) as e:
+            print(f"[WARNING] Invalid collision data: azimuth={azimuth}, distance={distance}, error={e}")
+            continue
+
+    # 正規化
+    histogram += 1e-6  # 0除算対策
+    histogram /= np.sum(histogram)
+
+    return histogram
     
+    # 正規化
+    histogram += 1e-6  # 0除算対策
+    histogram /= np.sum(histogram)
+
     return histogram
 
 
   def get_exploration_improvement_histogram(self) -> np.ndarray:
     """
-    探査向上性の高い方向を算出
+    探査向上性の高い方向を算出（元々のVFH-Fuzzy設計）
     - 一つ前の探査方向を取得し次の方向から除外
     - リーダー機が衝突したのかを確認
     - 衝突がある場合、衝突方向を除外
-    - パラメータベースの探査戦略
-    - 未探査領域への誘導強化
     """
-    def apply_direction_weight(base_azimuth: float, k: float, sharpness: float = 10.0):
+    def apply_direction_weight_gauss(base_azimuth: float, k: float, sharpness: float = 10.0):
       """
-      指定された方位に基づいて、ヒストグラムの各方向に重みを適用
-      - k: 最小スコア（中心方向の抑制強さ）
-	    - sharpness: 分布の鋭さ（値が大きいほど、中心に強くペナルティがかかる）
-	    - angle_diff: base_azimuth からの角度差
-	    - decay: exp(-sharpness * (angle_diff)^2) を用いた減衰関数（ガウス的）
+      base_azimuth方向を中心にガウス分布で【抑制】をかける
+      - k: 抑制の強さ（0に近いほど強く抑制、1で抑制なし）
+      - sharpness: 抑制の鋭さ（大きいほど鋭く抑制）
       """
       for i in range(self.BIN_NUM):
         theta = 2 * np.pi * i / self.BIN_NUM
@@ -381,59 +429,15 @@ class AlgorithmVfhFuzzy():
     if self.agent_collision_flag and self.agent_azimuth is not None:
         apply_direction_weight_von(self.agent_azimuth, self.k_c)
 
-    # === 未探査領域への誘導強化 ===
-    # 環境から探査マップを取得して未探査領域の方向を強化
-    self._apply_unexplored_area_guidance(histogram)
-
-    # === 群ロボット探査最適化: パラメータベースの探査戦略 ===
-    self._apply_parameter_based_exploration(histogram)
-
     histogram += 1e-6  # ゼロ割り防止
     histogram /= np.sum(histogram)
     return histogram
 
-  def _apply_parameter_based_exploration(self, histogram):
-    """
-    パラメータベースの探査戦略（環境情報に依存しない）
-    - k_eに応じた探査行動の調整
-    - ランダム性と方向性のバランス
-    """
-    # k_eに応じた探査行動の調整
-    exploration_intensity = self.k_e / 50.0  # 0-1に正規化
-    
-    # 1. ランダム性の増加（探査促進）
-    randomness_factor = 1.0 + exploration_intensity * 0.3
-    for i in range(self.BIN_NUM):
-        histogram[i] *= (1.0 + np.random.uniform(-0.1, 0.1) * randomness_factor)
-    
-    # 2. 方向性の強化（k_eが大きいほど特定方向を重視）
-    if exploration_intensity > 0.5:
-        # 高探査モード：より積極的な方向選択
-        for i in range(self.BIN_NUM):
-            # 現在の方位から離れた方向を強化
-            if self.agent_azimuth is not None:
-                angle_diff = abs(2 * np.pi * i / self.BIN_NUM - self.agent_azimuth)
-                angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
-                if angle_diff > np.pi / 2:  # 90度以上離れた方向
-                    histogram[i] *= (1.0 + exploration_intensity * 0.5)
-    
-    # 3. 群ロボットの分散促進
-    # フォロワーの衝突データを活用して分散を促進
-    if len(self.follower_collision_data) > 0:
-        for azimuth, distance in self.follower_collision_data:
-            if distance < 1e-6:
-                continue
-            
-            # フォロワーがいる方向を避ける（分散促進）
-            for i in range(self.BIN_NUM):
-                angle = 2 * np.pi * i / self.BIN_NUM
-                angle_diff = min(abs(angle - azimuth), 2 * np.pi - abs(angle - azimuth))
-                if angle_diff < np.pi / 4:  # 45度以内の方向を抑制
-                    histogram[i] *= (1.0 - exploration_intensity * 0.3)
+
 
   def get_final_result_histogram(self, drivability, exploration_improvement) -> np.ndarray:
       """
-      ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す（群ロボット探査最適化版）
+      ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す（元々のVFH-Fuzzy設計）
       - drivability_histogram: 走行可能性ヒストグラム
       - exploration_improvement_histogram: 探査向上性ヒストグラム
       Returns:
@@ -443,20 +447,18 @@ class AlgorithmVfhFuzzy():
 
       fused_score = np.zeros(self.BIN_NUM, dtype=np.float32)
 
-      # 群ロボット探査最適化のためのパラメータ調整
-      alpha = 15.0  # 抑制の鋭さを増加（10.0 → 15.0）
-      exploration_weight = 1.5  # 探査向上性の重みを増加
+      # 元々の設計パラメータ
+      alpha = 10.0  # ソフト抑制の鋭さ（元々の設計値）
 
       for bin in range(self.BIN_NUM):
           drive_val = drivability[bin]
           explore_val = exploration_improvement[bin]
 
-          # 探査率向上を重視したソフト抑制係数
+          # ソフト抑制係数（元々の設計）
           suppression = 1 / (1 + np.exp(-alpha * (drive_val - self.th)))
 
-          # 探査向上性を重視したファジィ積推論
-          # 探査向上性の重みを増加し、探査効率を向上
-          fused_score[bin] = suppression * drive_val * (explore_val ** exploration_weight)
+          # 元々のファジィ積推論（探査向上性の重みは1.0）
+          fused_score[bin] = suppression * drive_val * explore_val
 
       fused_score += 1e-6  # ゼロ除け
       fused_score /= np.sum(fused_score)
@@ -467,9 +469,9 @@ class AlgorithmVfhFuzzy():
   
   def select_final_direction_by_weighted_sampling(self, result: np.ndarray) -> float:
     """
-    群ロボット探査最適化版の方向選択アルゴリズム
-    - 探査効率を重視した重み付け
-    - より積極的な探査行動の促進
+    元々のVFH-Fuzzy設計の方向選択アルゴリズム
+    - 四分位数ベースの重み付けサンプリング
+    - 適度な探査行動の促進
     """
     q1, q2, q3 = np.quantile(result, [0.25, 0.5, 0.75])
 
@@ -480,6 +482,33 @@ class AlgorithmVfhFuzzy():
     bins = bins_very_good + bins_good + bins_okay
 
     if not bins:
+        # 境界近くでの適切なフォールバック処理
+        if self.env is not None and hasattr(self.env, 'explored_map'):
+            map_height, map_width = self.env.explored_map.shape
+            current_x = int(self.agent_coordinate_x)
+            current_y = int(self.agent_coordinate_y)
+            
+            # 境界からの距離を計算
+            distance_to_left = current_x
+            distance_to_right = map_width - current_x - 1
+            distance_to_top = current_y
+            distance_to_bottom = map_height - current_y - 1
+            
+            # 最も遠い境界の方向を選択（中央方向への復帰）
+            distances = [distance_to_right, distance_to_bottom, distance_to_left, distance_to_top]
+            directions = [0.0, np.pi/2, np.pi, 3*np.pi/2]  # 右、下、左、上
+            
+            max_distance_idx = np.argmax(distances)
+            fallback_theta = directions[max_distance_idx]
+            
+            # ランダム性を追加（±30度の範囲）
+            fallback_theta += np.random.uniform(-np.pi/6, np.pi/6)
+            fallback_theta = fallback_theta % (2 * np.pi)
+            
+            print(f"[Fallback-Boundary] No valid bin found. Moving toward center: {np.rad2deg(fallback_theta):.1f}°")
+            return fallback_theta
+        
+        # 従来のフォールバック処理
         if self.agent_azimuth is not None:
             fallback_theta = (self.agent_azimuth + np.pi) % (2 * np.pi)
             print(f"[Fallback] No valid bin found. Returning reverse direction: {np.rad2deg(fallback_theta)} deg")
@@ -489,11 +518,10 @@ class AlgorithmVfhFuzzy():
             print(f"[Fallback] No azimuth available. Returning random direction: {np.rad2deg(fallback_theta)} deg")
             return fallback_theta
 
-    # 群ロボット探査最適化のための重み付け調整
-    # より積極的な探査行動を促進
-    score_q1 = 0.7 if bins_very_good else 0.0  # 0.6 → 0.7
-    score_q2 = 0.2 if bins_good else 0.0       # 0.25 → 0.2
-    score_q3 = 0.1 if bins_okay else 0.0       # 0.15 → 0.1
+    # 元々の設計の重み付け
+    score_q1 = 0.6 if bins_very_good else 0.0  # Very Good: 60%
+    score_q2 = 0.25 if bins_good else 0.0      # Good: 25%
+    score_q3 = 0.15 if bins_okay else 0.0      # Okay: 15%
     total_score = score_q1 + score_q2 + score_q3
 
     # 正規化
@@ -515,31 +543,7 @@ class AlgorithmVfhFuzzy():
 
     return selected_angle
 
-  def _apply_unexplored_area_guidance(self, histogram):
-    """
-    未探査領域への誘導を強化する
-    - 探査マップから未探査領域の方向を特定
-    - 未探査領域の方向を強化
-    """
-    if self.env is not None and hasattr(self.env, 'explored_map') and self.env.explored_map is not None:
-        current_x = int(self.agent_coordinate_x)
-        current_y = int(self.agent_coordinate_y)
-        scan_radius = 10
-        for i in range(self.BIN_NUM):
-            angle = 2 * np.pi * i / self.BIN_NUM
-            unexplored_count = 0
-            total_count = 0
-            for distance in range(1, scan_radius + 1):
-                check_x = int(current_x + distance * np.cos(angle))
-                check_y = int(current_y + distance * np.sin(angle))
-                if (0 <= check_y < self.env.explored_map.shape[0] and 
-                    0 <= check_x < self.env.explored_map.shape[1]):
-                    total_count += 1
-                    if self.env.explored_map[check_y, check_x] == 0:
-                        unexplored_count += 1
-            if total_count > 0:
-                unexplored_ratio = unexplored_count / total_count
-                histogram[i] *= (1.0 + unexplored_ratio * 2.0)
+
 
   def select_direction_with_candidates(self, state, sampled_params):
     """
@@ -553,31 +557,60 @@ class AlgorithmVfhFuzzy():
     mean_score = np.mean(self.result_histogram)
     valid_bins = [i for i, score in enumerate(self.result_histogram) if score >= mean_score and score > 0.0]
 
-    # 隣接binをグループ化
-    groups = []
-    current_group = []
-    for idx in range(len(valid_bins)):
-        if not current_group:
-            current_group.append(valid_bins[idx])
-        else:
-            prev = current_group[-1]
-            if (valid_bins[idx] == (prev + 1) % self.BIN_NUM):
+    # 全方向が有効な場合でも、より確率的な動作を促進
+    if len(valid_bins) >= self.BIN_NUM * 0.8:  # 80%以上のbinが有効な場合（29個以上）
+        # 隣接binをグループ化して確率分布を改善
+        groups = []
+        current_group = []
+        for idx in range(len(valid_bins)):
+            if not current_group:
                 current_group.append(valid_bins[idx])
             else:
+                prev = current_group[-1]
+                if (valid_bins[idx] == (prev + 1) % self.BIN_NUM):
+                    current_group.append(valid_bins[idx])
+                else:
+                    groups.append(current_group)
+                    current_group = [valid_bins[idx]]
+        if current_group:
+            # 先頭と末尾がつながっている場合
+            if groups and (current_group[0] == 0 and groups[0][-1] == self.BIN_NUM - 1):
+                groups[0] = current_group + groups[0]
+            else:
                 groups.append(current_group)
-                current_group = [valid_bins[idx]]
-    if current_group:
-        # 先頭と末尾がつながっている場合
-        if groups and (current_group[0] == 0 and groups[0][-1] == self.BIN_NUM - 1):
-            groups[0] = current_group + groups[0]
-        else:
-            groups.append(current_group)
+        print(f"[GROUPING] All directions valid ({len(valid_bins)}/36 bins), using grouped bins for better probability distribution")
+    else:
+        # 隣接binをグループ化
+        groups = []
+        current_group = []
+        for idx in range(len(valid_bins)):
+            if not current_group:
+                current_group.append(valid_bins[idx])
+            else:
+                prev = current_group[-1]
+                if (valid_bins[idx] == (prev + 1) % self.BIN_NUM):
+                    current_group.append(valid_bins[idx])
+                else:
+                    groups.append(current_group)
+                    current_group = [valid_bins[idx]]
+        if current_group:
+            # 先頭と末尾がつながっている場合
+            if groups and (current_group[0] == 0 and groups[0][-1] == self.BIN_NUM - 1):
+                groups[0] = current_group + groups[0]
+            else:
+                groups.append(current_group)
 
     # 各グループの中心角度・代表スコア
     valid_directions = []
     for group in groups:
-        angles = [2 * np.pi * i / self.BIN_NUM for i in group]
-        center_angle = np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))
+        if len(group) == 1:
+            # 個別binの場合は直接角度を計算
+            center_angle = 2 * np.pi * group[0] / self.BIN_NUM
+        else:
+            # グループの場合は平均角度を計算
+            angles = [2 * np.pi * i / self.BIN_NUM for i in group]
+            center_angle = np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))
+        
         group_score = np.mean([self.result_histogram[i] for i in group])
         valid_directions.append({"angle": center_angle, "score": group_score})
 
@@ -587,8 +620,18 @@ class AlgorithmVfhFuzzy():
         probs = scores / scores.sum()
         selected_idx = np.random.choice(len(valid_directions), p=probs)
         theta = valid_directions[selected_idx]["angle"]
+        
+        # デバッグ情報出力（方向選択の詳細）
+        if hasattr(self, 'debug_direction_selection') and self.debug_direction_selection:
+            print(f"[VFH-Fuzzy Direction Selection]")
+            print(f"  Valid groups: {len(valid_directions)}")
+            for i, vd in enumerate(valid_directions):
+                print(f"    Group {i}: angle={np.rad2deg(vd['angle']):.1f}°, score={vd['score']:.3f}, prob={probs[i]:.3f}")
+            print(f"  Selected: Group {selected_idx}, theta={np.rad2deg(theta):.1f}°")
     else:
         theta = np.random.uniform(0, 2 * np.pi)
+        if hasattr(self, 'debug_direction_selection') and self.debug_direction_selection:
+            print(f"[VFH-Fuzzy] No valid directions, random theta={np.rad2deg(theta):.1f}°")
 
     # 選択した方向を記録（衝突回避用）
     self.last_theta = theta

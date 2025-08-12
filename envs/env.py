@@ -380,6 +380,10 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         self.follower_executor = ThreadPoolExecutor(max_workers=self.__robot_num)
         self.follower_futures = []
 
+        # SystemAgentのエピソードリセット
+        if hasattr(self, 'system_agent') and self.system_agent is not None:
+            self.system_agent.reset_episode()
+
         return self.state
 
 
@@ -1116,6 +1120,10 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
         # agent_stepを更新
         self._state["agent_step"] += 1
         
+        # SystemAgentのステップカウンターを更新
+        if hasattr(self, 'system_agent') and self.system_agent is not None:
+            self.system_agent.update_step()
+        
         for swarm_id, action in actions.items():
             theta = action.get("theta")
             swarm = self._find_swarm_by_id(swarm_id)
@@ -1210,9 +1218,9 @@ class Env(gym.Env, Configurable, Stateful, Loggable, Renderable):
                 else:
                     # 衝突時の処理
                     if collision:
-                        print(f"[WARNING] Leader {leader.id} collision detected, movement cancelled")
+                        print(f"[WARNING] Leader {leader.id} collision detected, but continuing movement")
                         leader.collision_flag = True
-                        # 衝突時は移動しない（現在位置を維持）
+                        # 衝突フラグは立てるが、移動は継続（VFH-Fuzzyで回避方向を選択）
                     else:
                         # next_coordinateがNoneの場合
                         # この場合は移動を試行しないが、衝突フラグはリセット

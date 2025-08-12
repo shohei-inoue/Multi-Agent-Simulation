@@ -36,10 +36,40 @@ Multi-Agent-Simulation プロジェクトは、群ロボットの未知環境に
 - SwarmAgent による低レベル行動
 - 学習による適応的分岐・統合
 
+## システム構成
+
+### 1. エージェント階層
+
+```
+┌─────────────────┐
+│   SystemAgent   │  ← 高レベル制御（分岐・統合判定）
+│   (学習あり/なし) │
+└─────────┬───────┘
+          │
+    ┌─────▼─────┐
+    │ SwarmAgent│  ← 低レベル行動（移動方向決定）
+    │(学習あり/なし)│
+    └─────┬─────┘
+          │
+    ┌─────▼─────┐
+    │ VFH-Fuzzy │  ← 行動決定アルゴリズム
+    │ Algorithm │
+    └───────────┘
+```
+
+### 2. Config 別の設定
+
+| Config | SystemAgent | SwarmAgent | 分岐・統合 | 学習モード         |
+| ------ | ----------- | ---------- | ---------- | ------------------ |
+| **A**  | 学習なし    | 学習なし   | 無効       | 固定パラメータ     |
+| **B**  | 学習なし    | 学習あり   | 無効       | 学習済みパラメータ |
+| **C**  | 学習あり    | 学習なし   | 有効       | 固定パラメータ     |
+| **D**  | 学習あり    | 学習あり   | 有効       | 学習済みパラメータ |
+
 ## ディレクトリ構造
 
 ```
-red-group-behavior/
+Multi-Agent-Simulation/
 ├── core/                          # コアモジュール
 │   ├── __init__.py
 │   ├── config.py                  # 設定管理
@@ -98,374 +128,526 @@ red-group-behavior/
 
 ### 1. 設定管理 (core/config.py)
 
+設定の一元管理と型安全性を提供します。
+
 ```python
-class ConfigManager:
-    """Central configuration manager"""
+class Config:
+    """Centralized configuration management"""
 
     def __init__(self):
         self.simulation = SimulationConfig()
-        self.system = SystemConfig()
-        self._params = {}
+        self.environment = EnvironmentConfig()
+        self.agents = AgentConfig()
+        self.learning = LearningConfig()
+
+    def validate(self):
+        """Validate all configurations"""
+        # 設定の整合性チェック
+        pass
 ```
 
-**機能:**
+### 2. エージェントシステム
 
-- シミュレーション設定の管理
-- システム設定の自動検出
-- ログディレクトリの自動作成
-- 設定の検証と型安全性
+#### SystemAgent
 
-### 2. インターフェース (core/interfaces.py)
+高レベル制御を担当し、群の分岐・統合を管理します。
 
 ```python
-class Renderable(ABC):
-    """Interface for objects that can be rendered"""
+class SystemAgent(BaseAgent):
+    """System-level agent for swarm management"""
 
-class Loggable(ABC):
-    """Interface for objects that can be logged"""
+    def __init__(self, env, algorithm, model, action_space, param):
+        super().__init__(env, algorithm, model, action_space=action_space)
+        self.param = param
+        self.isLearning = param.learningParameter is not None
+        self.learningParameter = param.learningParameter
+        self.branchCondition = param.branch_condition
+        self.integrationCondition = param.integration_condition
 
-class Configurable(ABC):
-    """Interface for objects that can be configured"""
+        # 群管理
+        self.swarm_agents = {}  # swarm_id -> swarm_agent
+        self.next_swarm_id = 0
 
-class SwarmMember(ABC):
-    """Interface for swarm members"""
+        # 学習情報の管理
+        self.learning_history = {}  # swarm_id -> 学習情報のマッピング
+
+        # 分岐・統合のクールダウン
+        self.last_branch_time = 0
+        self.last_integration_time = 0
+
+    def check_branch(self, system_state: Dict[str, Any]) -> bool:
+        """分岐条件をチェックし、条件を満たせば分岐を実行"""
+        # 分岐が無効になっている場合は分岐を実行しない
+        if not self.branchCondition.branch_enabled:
+            return False
+
+        # 分岐条件チェック
+        follower_count = system_state.get("follower_count", 0)
+        valid_directions = system_state.get("valid_directions", [])
+        avg_mobility = system_state.get("avg_mobility", 0.0)
+
+        should_branch = (
+            follower_count >= 3 and
+            len(valid_directions) >= 2 and
+            avg_mobility >= self.branch_threshold
+        )
+
+        if should_branch:
+            self._execute_branch(system_state)
+            return True
+
+        return False
+
+    def check_integration(self, system_state: Dict[str, Any]) -> bool:
+        """統合条件をチェックし、条件を満たせば統合を実行"""
+        # 統合が無効になっている場合は統合を実行しない
+        if not self.integrationCondition.integration_enabled:
+            return False
+
+        # 統合条件チェック
+        avg_mobility = system_state.get("avg_mobility", 0.0)
+        swarm_count = system_state.get("swarm_count", 1)
+
+        base_condition = (
+            swarm_count >= self.integrationCondition.min_swarms_for_integration and
+            (avg_mobility < self.integration_threshold or swarm_count >= 5)
+        )
+
+        if base_condition:
+            self._execute_integration(system_state)
+            return True
+
+        return False
 ```
 
-**機能:**
+#### SwarmAgent
 
-- 共通インターフェースの定義
-- コンポーネント間の一貫性確保
-- 拡張性の向上
-- テスト容易性の向上
-
-### 3. ファクトリパターン (core/factories.py)
+低レベル行動を担当し、VFH-Fuzzy アルゴリズムを使用して移動方向を決定します。
 
 ```python
-class BaseFactory(ABC):
-    """Base factory class"""
+class SwarmAgent(BaseAgent):
+    """Swarm-level agent for movement control"""
 
-class AlgorithmFactory(BaseFactory):
-    """Factory for algorithms"""
+    def __init__(self, env, algorithm, model, action_space, param, system_agent=None, swarm_id=None):
+        super().__init__(env, algorithm, model, action_space=action_space)
+        self.action_space = action_space
+        self.param = param
+        self.isLearning = param.isLearning
+        self.learningParameter = param.learningParameter
+        self.debug = param.debug
+        self.system_agent = system_agent
+        self.swarm_id = swarm_id
 
-class AgentFactory(BaseFactory):
-    """Factory for agents"""
+    def get_action(self, state: Dict[str, Any], episode: int = 0, log_dir: Optional[str] = None) -> Tuple[tf.Tensor, Dict[str, Any]]:
+        """アクションを取得（学習ログ機能付き）"""
+        # 学習なしモードの場合
+        if not self.isLearning or self.model is None:
+            # デフォルトのパラメータを使用してアルゴリズムを実行
+            default_params = np.array([0.5, 10.0, 5.0])  # th, k_e, k_c
+            theta, valid_directions = self.algorithm.policy(state, default_params)
+
+            # 分岐・統合条件の判定
+            follower_scores = state.get("follower_mobility_scores", [])
+            follower_count = len(follower_scores)
+            avg_mobility = np.mean(follower_scores) if follower_count > 0 else 0.0
+
+            # SystemAgentから閾値を取得
+            branch_threshold = 0.5  # デフォルト値
+            integration_threshold = 0.3  # デフォルト値
+
+            should_branch = (
+                follower_count >= 3 and
+                valid_directions and len(valid_directions) >= 2 and
+                avg_mobility >= branch_threshold
+            )
+            should_integrate = avg_mobility < integration_threshold
+
+            # 分岐・統合判定
+            if self.system_agent and should_branch:
+                self.system_agent.check_branch(system_state)
+            if self.system_agent and should_integrate:
+                self.system_agent.check_integration(system_state)
+
+            return {"theta": theta}, {
+                'theta': theta,
+                'valid_directions': valid_directions
+            }
+
+        # 学習ありモードの場合
+        assert self.model is not None, "model must not be None"
+
+        # 状態をテンソルに変換
+        state_vec = tf.convert_to_tensor([flatten_state(state)], dtype=tf.float32)
+
+        # モデルから学習パラメータとアクションパラメータを取得
+        learning_mu, learning_std, theta_mu, theta_std, value = self.model(state_vec)
+
+        # 学習パラメータをサンプリング
+        learning_params = self.model.sample_learning_params(learning_mu, learning_std)
+
+        # アルゴリズムに学習パラメータを渡してポリシーを実行
+        theta, valid_directions = self.algorithm.policy(state, learning_params)
+
+        # アクション（theta）をサンプリング
+        action_theta = self.model.sample_action(theta_mu, theta_std)
+
+        return {"theta": theta_value}, {
+            'theta': float(action_theta) if not isinstance(action_theta, tuple) else float(action_theta[0]),
+            'learning_params': learning_params.numpy().tolist() if hasattr(learning_params, 'numpy') else list(learning_params),
+            'valid_directions': valid_directions,
+            'value': float(value)
+        }
 ```
 
-**機能:**
+### 3. VFH-Fuzzy アルゴリズム
 
-- コンポーネントの動的生成
-- 依存関係の管理
-- 設定による動作制御
-- 拡張性の向上
+群ロボットの移動方向決定を担当する VFH-Fuzzy アルゴリズムを実装しています。
 
-### 4. ログ管理 (core/logging.py)
+> **詳細仕様**:
+>
+> - 理論的背景: [VFH-Fuzzy 理論](vfh_fuzzy_theory.md)
+> - 数式仕様: [VFH-Fuzzy 推論の数式仕様](vfh_fuzzy_mathematical_specification.md)
 
 ```python
-class Logger:
-    """Centralized logger"""
+class AlgorithmVfhFuzzy():
+    """VFH-Fuzzy algorithm for swarm robot navigation"""
 
-class ComponentLogger:
-    """Logger for specific components"""
+    KAPPA = 1.0
+    BIN_SIZE_DEG = 10  # ビンのサイズ（度）- 360/36=10度
+    BIN_NUM = 36  # ビン数
+    ANGLES = np.linspace(0, 2 * np.pi, BIN_NUM, endpoint=False)  # 角度
+
+    def __init__(self, env=None):
+        """初期化"""
+        self.env = env
+        self.th = 0.5
+        self.k_e = 10.0
+        self.k_c = 5.0
+
+        # 状態情報
+        self.agent_coordinate_x = 0.0
+        self.agent_coordinate_y = 0.0
+        self.agent_azimuth = None
+        self.agent_collision_flag = False
+        self.follower_collision_data = []
+
+        # 衝突回避用
+        self.last_theta = None
+        self.last_collision_theta = None
+
+        # ヒストグラム
+        self.BIN_NUM = 36
+        self.BIN_SIZE_DEG = 360 // self.BIN_NUM
+        self.ANGLES = np.linspace(0, 2 * np.pi, self.BIN_NUM, endpoint=False)
+
+        # 結果
+        self.drivability_histogram = None
+        self.exploration_improvement_histogram = None
+        self.result_histogram = None
+        self.theta = 0.0
+        self.mode = 0
+
+    def policy(self, state, sampled_params, episode=None, log_dir=None):
+        """SwarmAgent用の行動決定ポリシー: thetaとvalid_directionsを返す"""
+        theta, valid_directions = self.select_direction_with_candidates(state, sampled_params)
+        return theta, valid_directions
+
+    def get_obstacle_density_histogram(self):
+        """障害物密度に基づく走行可能性分布を生成"""
+        histogram = np.zeros(self.BIN_NUM)
+
+        # 前回衝突した方向を避ける
+        if self.last_collision_theta is not None:
+            collision_bin = int(self.last_collision_theta * self.BIN_NUM / (2 * np.pi)) % self.BIN_NUM
+            for i in range(self.BIN_NUM):
+                distance = min(abs(i - collision_bin), abs(i - collision_bin + self.BIN_NUM), abs(i - collision_bin - self.BIN_NUM))
+                if distance < 4:  # 前回衝突した方向の周辺4bin（40度範囲）を低評価
+                    histogram[i] = 0.05
+                else:
+                    histogram[i] = 1.0
+            return histogram
+
+        # フォロワーの衝突データのみを使用
+        histogram = np.ones(self.BIN_NUM, dtype=np.float32)
+
+        for azimuth, distance in self.follower_collision_data:
+            if distance < 1e-6:
+                continue
+
+            azimuth_deg = azimuth % 360.0
+            bin_index = int(azimuth_deg) // self.BIN_SIZE_DEG
+
+            obstacle_weight = 1.0 / (distance + 1e-3)
+            histogram[bin_index] -= obstacle_weight
+
+        histogram = np.maximum(histogram, 0.01)
+        histogram += 1e-6
+        histogram /= np.sum(histogram)
+
+        return histogram
+
+    def get_exploration_improvement_histogram(self) -> np.ndarray:
+        """探査向上性に基づく探索欲求分布を生成"""
+        histogram = np.ones(self.BIN_NUM)
+
+        def apply_direction_weight_gauss(base_azimuth: float, k: float, sharpness: float = 10.0):
+            """base_azimuth方向を中心にガウス分布で【抑制】をかける"""
+            for i in range(self.BIN_NUM):
+                angle = 2 * np.pi * i / self.BIN_NUM
+                angle_diff = abs(angle - base_azimuth)
+                angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
+
+                decay = 1 - (1 - k) * np.exp(-sharpness * angle_diff ** 2)
+                histogram[i] *= decay
+
+        def apply_direction_weight_von(base_azimuth: float, kappa: float):
+            """von Mises分布による方向重みの適用"""
+            for i in range(self.BIN_NUM):
+                angle = 2 * np.pi * i / self.BIN_NUM
+                angle_diff = abs(angle - base_azimuth)
+                angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
+
+                decay = np.exp(kappa * np.cos(angle_diff)) / (2 * np.pi * i0(kappa))
+                histogram[i] *= decay
+
+        # 探査逆方向（過去方向）の抑制
+        if hasattr(self, 'agent_azimuth') and self.agent_azimuth is not None:
+            apply_direction_weight_gauss(self.agent_azimuth, self.k_e)
+
+        # 衝突方向の抑制
+        if hasattr(self, 'agent_azimuth') and self.agent_azimuth is not None:
+            apply_direction_weight_von(self.agent_azimuth, self.k_c)
+
+        histogram += 1e-6
+        histogram /= np.sum(histogram)
+
+        return histogram
+
+    def get_final_result_histogram(self, drivability, exploration_improvement) -> np.ndarray:
+        """ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す"""
+        fused_score = np.zeros(self.BIN_NUM, dtype=np.float32)
+
+        # 元々の設計パラメータ
+        alpha = 10.0  # ソフト抑制の鋭さ
+
+        for bin in range(self.BIN_NUM):
+            drive_val = drivability[bin]
+            explore_val = exploration_improvement[bin]
+
+            # ソフト抑制係数
+            suppression = 1 / (1 + np.exp(-alpha * (drive_val - self.th)))
+
+            # ファジィ積推論
+            fused_score[bin] = suppression * drive_val * explore_val
+
+        fused_score += 1e-6
+        fused_score /= np.sum(fused_score)
+
+        return fused_score
+
+    def select_direction_with_candidates(self, state, sampled_params):
+        """theta（選択方向）とvalid_directions（有効方向リスト）を返す"""
+        self.get_state_info(state, sampled_params)
+        self.drivability_histogram = self.get_obstacle_density_histogram()
+        self.exploration_improvement_histogram = self.get_exploration_improvement_histogram()
+        self.result_histogram = self.get_final_result_histogram(self.drivability_histogram, self.exploration_improvement_histogram)
+        mean_score = np.mean(self.result_histogram)
+        valid_bins = [i for i, score in enumerate(self.result_histogram) if score >= mean_score and score > 0.0]
+
+        # 全方向が有効な場合（36個すべて）は個別のbinを選択
+        if len(valid_bins) >= self.BIN_NUM * 0.8:  # 80%以上のbinが有効な場合（29個以上）
+            groups = [[bin] for bin in valid_bins]
+        else:
+            # 隣接binをグループ化
+            groups = []
+            current_group = []
+            for idx in range(len(valid_bins)):
+                if not current_group:
+                    current_group.append(valid_bins[idx])
+                else:
+                    prev = current_group[-1]
+                    if (valid_bins[idx] == (prev + 1) % self.BIN_NUM):
+                        current_group.append(valid_bins[idx])
+                    else:
+                        groups.append(current_group)
+                        current_group = [valid_bins[idx]]
+            if current_group:
+                if groups and (current_group[0] == 0 and groups[0][-1] == self.BIN_NUM - 1):
+                    groups[0] = current_group + groups[0]
+                else:
+                    groups.append(current_group)
+
+        # 各グループの中心角度・代表スコア
+        valid_directions = []
+        for group in groups:
+            if len(group) == 1:
+                center_angle = 2 * np.pi * group[0] / self.BIN_NUM
+            else:
+                angles = [2 * np.pi * i / self.BIN_NUM for i in group]
+                center_angle = np.arctan2(np.mean(np.sin(angles)), np.mean(np.cos(angles)))
+
+            group_score = np.mean([self.result_histogram[i] for i in group])
+            valid_directions.append({"angle": center_angle, "score": group_score})
+
+        # thetaはグループのスコアで重み付けサンプリング
+        scores = np.array([d["score"] for d in valid_directions])
+        if len(scores) > 0:
+            probs = scores / scores.sum()
+            selected_idx = np.random.choice(len(valid_directions), p=probs)
+            theta = valid_directions[selected_idx]["angle"]
+        else:
+            theta = np.random.uniform(0, 2 * np.pi)
+
+        # 選択した方向を記録（衝突回避用）
+        self.last_theta = theta
+
+        return theta, valid_directions
 ```
 
-**機能:**
+## 学習システム
 
-- 構造化されたログ出力
-- コンポーネント別のログ管理
-- メトリクスの自動収集
-- TensorBoard 統合
+### 1. Actor-Critic (A2C)
 
-### 5. メインアプリケーション (core/application.py)
+強化学習アルゴリズムとして Actor-Critic を採用しています。
 
 ```python
-class Application:
-    """Main application class"""
+class ActorCritic:
+    """Actor-Critic model for reinforcement learning"""
 
-    def setup(self, params: Param):
-        """Setup the application with parameters"""
-
-    def run_experiment(self, experiment_config: ExperimentConfig):
-        """Run a complete experiment"""
-```
-
-**機能:**
-
-- アプリケーション全体の管理
-- 実験の実行と管理
-- リソースの適切な管理
-- エラーハンドリング
-
-## エージェントアーキテクチャ
-
-### 1. SystemAgent（高レベル制御）
-
-```python
-class SystemAgent:
-    """Global system agent for high-level control"""
-
-    def check_branch(self, swarm_state):
-        """Check if branching is needed"""
-
-    def check_integration(self, swarm_state):
-        """Check if integration is needed"""
-```
-
-**機能:**
-
-- 群の分岐・統合の判断
-- 学習パラメータの管理
-- システム全体の監視
-- 報酬設計の最適化
-
-### 2. SwarmAgent（低レベル行動）
-
-```python
-class SwarmAgent:
-    """Individual swarm agent for low-level actions"""
+    def __init__(self, state_size, action_size, learning_rate=0.001):
+        self.actor = self._build_actor(state_size, action_size)
+        self.critic = self._build_critic(state_size)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate)
 
     def get_action(self, state):
-        """Get movement action (theta)"""
+        """Get action from current state"""
+        state = np.array([state])
+        action_probs = self.actor.predict(state)[0]
+        action = np.random.choice(len(action_probs), p=action_probs)
+        return action, action_probs
 
-    def update_learning_params(self, reward):
-        """Update learning parameters"""
+    def update(self, states, actions, rewards, next_states, dones):
+        """Update actor and critic networks"""
+        # Actor-Critic更新ロジック
 ```
 
-**機能:**
-
-- VFH-Fuzzy アルゴリズムによる移動
-- 学習パラメータの調整
-- 衝突回避の学習
-- 探査効率の最適化
-
-## アルゴリズムアーキテクチャ
-
-### 1. VFH-Fuzzy アルゴリズム
+### 2. 学習パラメータ管理
 
 ```python
-class AlgorithmVfhFuzzy:
-    """VFH-Fuzzy algorithm for movement"""
-
-    def policy(self, state, sampled_params):
-        """Get movement direction"""
-
-    def update_params(self, th, k_e, k_c):
-        """Update algorithm parameters"""
+@dataclass
+class LearningParameter:
+    type: Literal["a2c"]
+    model: Literal["actor-critic"]
+    optimizer: Literal["adam"]
+    gamma: float
+    learningLate: float
+    nStep: int
+    inherit_learning_info: bool = True
+    merge_learning_info: bool = True
 ```
 
-**機能:**
+## 分岐・統合システム
 
-- 衝突方向の確率低下
-- 学習によるパラメータ調整
-- 探査向上性の最適化
-- フロンティアベース探査
-
-### 2. 分岐アルゴリズム
+### 1. 分岐条件
 
 ```python
-class BranchAlgorithm:
-    """Base class for branching algorithms"""
+def check_branch(self, system_state: Dict[str, Any]) -> bool:
+    """分岐条件をチェックし、条件を満たせば分岐を実行"""
+    # 分岐が無効になっている場合は分岐を実行しない
+    if not self.branchCondition.branch_enabled:
+        return False
 
-class MobilityBasedBranchAlgorithm:
-    """Mobility-based branching algorithm"""
+    # 分岐条件チェック
+    follower_count = system_state.get("follower_count", 0)
+    valid_directions = system_state.get("valid_directions", [])
+    avg_mobility = system_state.get("avg_mobility", 0.0)
 
-class RandomBranchAlgorithm:
-    """Random branching algorithm"""
+    should_branch = (
+        follower_count >= 3 and
+        len(valid_directions) >= 2 and
+        avg_mobility >= self.branch_threshold
+    )
+
+    if should_branch:
+        self._execute_branch(system_state)
+        return True
+
+    return False
 ```
 
-**機能:**
-
-- 動的な群の分岐
-- 学習情報の引き継ぎ
-- 新しいリーダーの選択
-- フォロワーの再配置
-
-### 3. 統合アルゴリズム
+### 2. 統合条件
 
 ```python
-class IntegrationAlgorithm:
-    """Base class for integration algorithms"""
+def check_integration(self, system_state: Dict[str, Any]) -> bool:
+    """統合条件をチェックし、条件を満たせば統合を実行"""
+    # 統合が無効になっている場合は統合を実行しない
+    if not self.integrationCondition.integration_enabled:
+        return False
 
-class NearestIntegrationAlgorithm:
-    """Nearest-based integration algorithm"""
-```
+    # 統合条件チェック
+    avg_mobility = system_state.get("avg_mobility", 0.0)
+    swarm_count = system_state.get("swarm_count", 1)
 
-**機能:**
+    base_condition = (
+        swarm_count >= self.integrationCondition.min_swarms_for_integration and
+        (avg_mobility < self.integration_threshold or swarm_count >= 5)
+    )
 
-- 動的な群の統合
-- 学習情報の統合
-- 探査領域の重複チェック
-- リーダーの統合
+    if base_condition:
+        self._execute_integration(system_state)
+        return True
 
-## データフロー
-
-### 1. 初期化フロー
-
-```
-main.py → Application.setup() → Factories → Components
-```
-
-1. メインファイルでパラメータを初期化
-2. アプリケーションクラスでセットアップ
-3. ファクトリが各コンポーネントを生成
-4. 依存関係を解決してアプリケーションを構築
-
-### 2. 実験実行フロー
-
-```
-Application.run_experiment() → Episode Loop → SystemAgent → SwarmAgent → Environment → Logging
-```
-
-1. 実験設定に基づいてエピソードを実行（100 エピソード）
-2. SystemAgent が分岐・統合を判断
-3. SwarmAgent が移動行動を決定
-4. 環境で行動を実行（200×200 マップ）
-5. 結果をログに記録
-
-### 3. 学習フロー
-
-```
-Environment → Reward → SwarmAgent → VFH-Fuzzy → Parameter Update
-```
-
-1. 環境から報酬を計算
-2. SwarmAgent が学習パラメータを更新
-3. VFH-Fuzzy アルゴリズムのパラメータ調整
-4. 衝突方向の確率低下
-
-### 4. ログ出力フロー
-
-```
-Components → ComponentLogger → Logger → Files/TensorBoard
-```
-
-1. 各コンポーネントがイベントを記録
-2. コンポーネントロガーが構造化
-3. メインロガーが集約
-4. ファイルと TensorBoard に出力
-
-## 設計パターン
-
-### 1. ファクトリパターン
-
-- コンポーネントの動的生成
-- 設定による動作制御
-- 依存関係の管理
-
-### 2. ストラテジーパターン
-
-- アルゴリズムの動的切り替え
-- エージェントの種類による動作変更
-- 報酬関数の動的選択
-
-### 3. オブザーバーパターン
-
-- ログシステムによるイベント監視
-- メトリクスの自動収集
-- 状態変化の追跡
-
-### 4. コマンドパターン
-
-- 行動のカプセル化
-- 実行履歴の管理
-- アンドゥ/リドゥ機能の準備
-
-## 拡張性
-
-### 1. 新しいアルゴリズムの追加
-
-```python
-# 1. アルゴリズムクラスを作成
-class NewAlgorithm(BaseAlgorithm):
-    def policy(self, state, log_dir=None):
-        # 実装
-        pass
-
-# 2. ファクトリに登録
-algorithm_factory.register("new_algorithm", NewAlgorithm)
-```
-
-### 2. 新しいエージェントの追加
-
-```python
-# 1. エージェントクラスを作成
-class NewAgent(BaseAgent):
-    def get_action(self, state):
-        # 実装
-        pass
-
-# 2. ファクトリに登録
-agent_factory.register("new_agent", NewAgent)
-```
-
-### 3. 新しい環境の追加
-
-```python
-# 1. 環境クラスを作成
-class NewEnvironment(gym.Env):
-    def step(self, action):
-        # 実装
-        pass
-
-# 2. ファクトリに登録
-environment_factory.register("new_environment", NewEnvironment)
+    return False
 ```
 
 ## パフォーマンス最適化
 
-### 1. 非同期処理
+### 1. メモリ効率
 
-- フォロワーの並列実行
-- ログ出力の非同期化
-- メモリ効率の最適化
-
-### 2. メモリ管理
-
-- 適切なリソース解放
-- フレームキャプチャの最適化
-- 不要なデータの削除
-
-### 3. GPU 活用
-
-- TensorFlow の自動 GPU 検出
-- バッチ処理の最適化
+- 学習履歴の定期的なクリーンアップ
+- 不要なデータの自動削除
 - メモリ使用量の監視
 
-## テスト戦略
+### 2. 計算効率
 
-### 1. 単体テスト
+- バッチ処理による学習の効率化
+- 並列処理によるシミュレーション加速
+- キャッシュ機能による重複計算の回避
 
-- 各コンポーネントの独立テスト
-- インターフェースの検証
-- エッジケースの確認
+### 3. 学習効率
 
-### 2. 統合テスト
+- 適応的学習率調整
+- 早期停止条件の実装
+- 学習進捗の可視化
 
-- コンポーネント間の連携テスト
-- データフローの検証
-- エラーハンドリングの確認
+## 今後の改善方向
 
-### 3. パフォーマンステスト
+### 1. 動的パラメータ調整
 
-- 実行時間の測定
-- メモリ使用量の監視
-- スケーラビリティの確認
+- 環境状態に応じたリアルタイム調整
+- 探査進捗に基づく動的閾値調整
+- 群の状態に応じた制御パラメータ調整
 
-## 今後の拡張
+### 2. 階層的学習
 
-### 1. 分散処理
+- 個体レベルと群レベルの同時最適化
+- 群制御と個体行動の協調学習
+- マルチスケール最適化
 
-- マルチプロセス対応
-- クラウド実行環境
-- スケーラビリティの向上
+### 3. メタ学習
 
-### 2. リアルタイム処理
+- 様々な環境への適応能力の向上
+- 環境特性の自動認識
+- 汎用的な最適化戦略の学習
 
-- ストリーミングデータ対応
-- オンライン学習
-- 動的適応
+### 4. 多群最適化
 
-### 3. 可視化強化
+- 複数群の協調的最適化
+- 群間の競合と協調のバランス
+- 大規模群システムの最適化
 
-- インタラクティブダッシュボード
-- 3D 可視化
-- リアルタイムモニタリング
+### 5. 予測的群制御
+
+- 将来の動きやすさ予測
+- 予防的な群再編成
+- 長期的な効率最適化

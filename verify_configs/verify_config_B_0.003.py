@@ -38,7 +38,7 @@ def setup_verification_environment():
     
     # 基本設定
     sim_param.episodeNum = 100
-    sim_param.maxStepsPerEpisode = 200
+    sim_param.maxStepsPerEpisode = 50
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -81,8 +81,8 @@ def setup_config_B_agent():
     swarm_param.isLearning = True
     swarm_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,
-        optimizer=None,
+        model="actor-critic",
+        optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
         nStep=5

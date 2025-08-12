@@ -37,8 +37,8 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 5
-    sim_param.maxStepsPerEpisode = 10
+    sim_param.episodeNum = 10
+    sim_param.maxStepsPerEpisode = 50
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -61,35 +61,43 @@ def setup_verification_environment():
     return sim_param
 
 def setup_config_D_agent():
-    """Config_D用エージェント設定"""
+    """Config_D用エージェント設定（学習済みモデルなし）"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
     from params.swarm_agent import SwarmAgentParam
     from params.learning import LearningParameter
+    from params.debug import DebugParam
     
     agent_param = AgentParam()
     
-    # SystemAgent設定
+    # SystemAgent設定（新しいモデルで学習、分岐・統合あり）
     system_param = SystemAgentParam()
     system_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,
-        optimizer=None,
+        model="actor-critic",
+        optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
         nStep=5
     )
     system_param.branch_condition.branch_enabled = True
     system_param.integration_condition.integration_enabled = True
+    
+    # デバッグ設定を追加
+    system_param.debug = DebugParam()
+    system_param.debug.log_branch_events = True
+    system_param.debug.log_integration_events = True
+    system_param.debug.log_learning_progress = True
+    
     agent_param.system_agent_param = system_param
     
-    # SwarmAgent設定
+    # SwarmAgent設定（新しいモデルで学習）
     swarm_param = SwarmAgentParam()
     swarm_param.isLearning = True
     swarm_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,
-        optimizer=None,
+        model="actor-critic",
+        optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
         nStep=5
@@ -125,24 +133,21 @@ def run_verification():
         system_agent, swarm_agents = create_initial_agents(env, agent_param)
         print(f"✓ エージェント作成完了 - SwarmAgents: {len(swarm_agents)}")
         
-        # 5. 学習済みモデルの読み込み
-        print("5. 学習済みモデル読み込み中...")
-        # SystemAgentモデル読み込み
-        system_model_path = "trained_models/system_agent_model.h5"
-        if os.path.exists(system_model_path):
-            system_agent.load_model(system_model_path)
-            print(f"  ✓ SystemAgent モデル読み込み完了")
-        else:
-            print(f"  ⚠️ SystemAgent モデルファイルが見つかりません: {{system_model_path}}")
+        # 5. 新しいモデルで学習開始（学習済みモデルは使用しない）
+        print("5. 新しいモデルで学習設定中...")
         
-        # SwarmAgentモデル読み込み
+        # SystemAgentの学習設定確認
+        if system_agent.isLearning:
+            print("  ✓ SystemAgent: 学習モード（新しいモデルで学習開始）")
+        else:
+            print("  ✓ SystemAgent: 学習なしモード")
+            
+        # SwarmAgentの学習設定確認  
         for swarm_id, agent in swarm_agents.items():
-            model_path = f"trained_models/swarm_agent_model_{{swarm_id}}.h5"
-            if os.path.exists(model_path):
-                agent.load_model(model_path)
-                print(f"  ✓ SwarmAgent {{swarm_id}} モデル読み込み完了")
+            if agent.isLearning:
+                print(f"  ✓ SwarmAgent {swarm_id}: 学習モード（新しいモデルで学習開始）")
             else:
-                print(f"  ⚠️ SwarmAgent {{swarm_id}} モデルファイルが見つかりません: {{model_path}}")
+                print(f"  ✓ SwarmAgent {swarm_id}: 学習なしモード")
         
         # 6. SystemAgentを環境に設定
         print("6. SystemAgentを環境に設定中...")
@@ -155,6 +160,7 @@ def run_verification():
         print(f"✓ 出力ディレクトリ作成: {output_dir}")
         
         # 7. エピソード実行
+        print("7. エピソード実行中（学習しながら実行）...")
         results = []
         for episode in range(sim_param.episodeNum):
             print(f"\n--- エピソード {episode + 1}/{sim_param.episodeNum} ---")
@@ -208,7 +214,12 @@ def run_verification():
                         swarm_agents[swarm_id] = new_swarm_agent
                         # SystemAgentに新しいSwarmAgentを登録
                         system_agent.register_swarm_agent(new_swarm_agent, swarm_id)
-                        print(f"✓ SwarmAgent {swarm_id} 作成完了")
+                        
+                        # 新しいSwarmAgentのactionを即座に生成
+                        new_swarm_observation = env.get_swarm_agent_observation(swarm_id)
+                        action_tensor, action_dict = new_swarm_agent.get_action(new_swarm_observation)
+                        swarm_actions[swarm_id] = action_dict
+                        print(f"✓ SwarmAgent {swarm_id} 作成完了 - 初期action生成: theta={np.rad2deg(action_dict.get('theta', 0)):.1f}°")
                 
                 # ステップ実行（actionsを統合）
                 all_actions = {**swarm_actions}  # swarm_actionsをコピー

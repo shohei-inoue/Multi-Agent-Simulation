@@ -1,0 +1,2 @@
+Config,Sample_Count,Exploration_Rate_Mean,Exploration_Rate_Std,Exploration_Rate_Min,Exploration_Rate_Max,Steps_Mean,Steps_Std,Steps_Min,Steps_Max,Total_Reward_Mean,Total_Reward_Std
+OBSTACLE,12,0.38810416666666664,0.1716462899240673,0.12445,0.6309,50.0,0.0,50,50,0.0,0.0

@@ -1,0 +1,5 @@
+Config,Description,Best_Environment,Final_Exploration_Rate,Avg_Increase_Rate,Max_Increase_Rate,Exploration_Efficiency,Time_to_30%
+A,VFH-Fuzzy only,Density 0.0,0.4533,0.008806,0.031100,0.009067,25
+B,Pre-trained model,Density 0.0,0.6309,0.012301,0.035800,0.012618,25
+C,Branching/Integration,Density 0.0,0.5941,0.011528,0.036000,0.011882,20
+D,Branching/Integration + Learning,Density 0.0,0.5582,0.010910,0.042350,0.011163,18

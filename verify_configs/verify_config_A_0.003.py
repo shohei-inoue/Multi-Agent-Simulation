@@ -34,8 +34,8 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 100  # 並列処理のため3回に削減
-    sim_param.maxStepsPerEpisode = 200
+    sim_param.episodeNum = 3  # 並列処理のため3回に削減
+    sim_param.maxStepsPerEpisode = 50
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -140,15 +140,12 @@ def run_verification():
                 if step % 50 == 0:  # 50ステップごとにログ
                     print(f"    ステップ {step + 1}/{sim_param.maxStepsPerEpisode}")
                 
-                # デフォルト行動
+                # VFH-Fuzzyアルゴリズムを使用した行動決定
                 swarm_actions = {}
-                for swarm_id in swarm_agents.keys():
-                    swarm_actions[swarm_id] = {
-                        'theta': np.random.uniform(0, 2*np.pi),
-                        'th': 0.5,
-                        'k_e': 10.0,
-                        'k_c': 5.0
-                    }
+                for swarm_id, swarm_agent in swarm_agents.items():
+                    # VFH-Fuzzyアルゴリズムで行動決定
+                    action, action_info = swarm_agent.get_action(state)
+                    swarm_actions[swarm_id] = action
                 
                 # ステップ実行
                 next_state, rewards, done, truncated, info = env.step(swarm_actions)

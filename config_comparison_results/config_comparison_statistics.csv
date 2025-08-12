@@ -1,0 +1,5 @@
+Config,Description,Sample_Count,Exploration_Rate_Mean,Exploration_Rate_Std,Exploration_Rate_Min,Exploration_Rate_Max,Steps_Mean,Steps_Std,Steps_Min,Steps_Max,Exploration_Efficiency_Mean,Exploration_Efficiency_Std,Total_Reward_Mean,Total_Reward_Std
+A,"VFH-Fuzzy only (No branching/integration, No learning)",16,0.38907812499999994,0.20580523233448172,0.0997,0.59935,50.0,0.0,50,50,0.0077815625,0.004116104646689634,0.0,0.0
+B,Pre-trained model (No branching/integration),110,0.202304090909091,0.05242907841005256,0.0608,0.3383,50.0,0.0,50,50,0.004046081818181818,0.0010485815682010511,0.0,0.0
+C,Branching/Integration enabled (No learning),30,0.33918499999999996,0.16737211389183293,0.1614,0.7535,50.0,0.0,50,50,0.0067837,0.003347442277836658,0.0,0.0
+D,Branching/Integration + Learning,30,0.2710016666666667,0.09813251638977015,0.1323,0.5476,50.0,0.0,50,50,0.0054200333333333335,0.0019626503277954026,0.0,0.0

@@ -38,6 +38,67 @@ class SwarmAgent(BaseAgent):
             action: アクション（theta）
             action_info: アクション情報
         """
+        # 学習なしモードの場合
+        if not self.isLearning or self.model is None:
+            # デフォルトのパラメータを使用してアルゴリズムを実行
+            default_params = np.array([0.5, 10.0, 5.0])  # th, k_e, k_c
+            theta, valid_directions = self.algorithm.policy(state, default_params)
+            
+            # 分岐・統合条件の判定
+            follower_scores = state.get("follower_mobility_scores", [])
+            follower_count = len(follower_scores)
+            avg_mobility = np.mean(follower_scores) if follower_count > 0 else 0.0
+            
+            print(f"📊 SwarmAgent {self.swarm_id}（学習なし）: follower_scores={follower_scores}, follower_count={follower_count}, avg_mobility={avg_mobility:.3f}, valid_directions={len(valid_directions)}")
+            
+            # SystemAgentから閾値を取得
+            branch_threshold = 0.5  # デフォルト値
+            integration_threshold = 0.3  # デフォルト値
+            
+            if self.system_agent and hasattr(self.system_agent, 'model'):
+                if hasattr(self.system_agent.model, 'get_branch_threshold'):
+                    branch_threshold = self.system_agent.model.get_branch_threshold() or 0.5
+                if hasattr(self.system_agent.model, 'get_integration_threshold'):
+                    integration_threshold = self.system_agent.model.get_integration_threshold() or 0.3
+            
+            should_branch = (
+                follower_count >= 3 and
+                valid_directions and len(valid_directions) >= 2 and
+                avg_mobility >= branch_threshold
+            )
+            should_integrate = avg_mobility < integration_threshold
+            
+            # system_agentに送るstateを生成
+            system_state = {
+                "theta": theta,
+                "valid_directions": valid_directions,
+                "swarm_id": self.swarm_id,
+                "follower_count": follower_count,
+                "swarm_count": state.get("swarm_count", 1),
+                "swarm_mobility_score": follower_scores,
+                "avg_mobility": avg_mobility
+            }
+            
+            # 分岐判定
+            if self.system_agent and should_branch:
+                print(f"🔥 SwarmAgent {self.swarm_id}: 分岐条件満たし - check_branch呼び出し")
+                self.system_agent.check_branch(system_state)
+            elif self.system_agent:
+                print(f"🔍 SwarmAgent {self.swarm_id}: 分岐条件チェック - follower_count={follower_count}(要求≥3), valid_directions={len(valid_directions)}(要求≥2), avg_mobility={avg_mobility:.3f}(要求≥{branch_threshold})")
+            
+            # 統合判定
+            if self.system_agent and should_integrate:
+                print(f"🔥 SwarmAgent {self.swarm_id}: 統合条件満たし - check_integration呼び出し")
+                self.system_agent.check_integration(system_state)
+            elif self.system_agent:
+                print(f"🔍 SwarmAgent {self.swarm_id}: 統合条件チェック - avg_mobility={avg_mobility:.3f}(要求<{integration_threshold})")
+            
+            return {"theta": theta}, {
+                'theta': theta,
+                'valid_directions': valid_directions
+            }
+        
+        # 学習ありモードの場合
         assert self.model is not None, "model must not be None"
         
         # 状態をテンソルに変換
@@ -111,11 +172,17 @@ class SwarmAgent(BaseAgent):
         
         # 分岐判定
         if self.system_agent and should_branch:
+            print(f"🔥 SwarmAgent {self.swarm_id}: 分岐条件満たし - check_branch呼び出し（学習モード）")
             self.system_agent.check_branch(system_state)
+        elif self.system_agent:
+            print(f"🔍 SwarmAgent {self.swarm_id}: 分岐条件チェック（学習モード） - follower_count={follower_count}(要求≥3), valid_directions={len(valid_directions)}(要求≥2), avg_mobility={avg_mobility:.3f}(要求≥{branch_threshold})")
         
         # 統合判定
         if self.system_agent and should_integrate:
+            print(f"🔥 SwarmAgent {self.swarm_id}: 統合条件満たし - check_integration呼び出し（学習モード）")
             self.system_agent.check_integration(system_state)
+        elif self.system_agent:
+            print(f"🔍 SwarmAgent {self.swarm_id}: 統合条件チェック（学習モード） - avg_mobility={avg_mobility:.3f}(要求<{integration_threshold})")
         
         return {"theta": theta_value}, {
             'theta': float(action_theta) if not isinstance(action_theta, tuple) else float(action_theta[0]),

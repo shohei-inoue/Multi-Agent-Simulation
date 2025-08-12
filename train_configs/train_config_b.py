@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime
 
 # プロジェクトのルートディレクトリをパスに追加
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def setup_training_environment():
     """学習用環境設定"""
@@ -21,7 +21,7 @@ def setup_training_environment():
     
     # 基本設定
     sim_param.episodeNum = 1000  # 学習用に1000エピソード
-    sim_param.maxStepsPerEpisode = 200
+    sim_param.maxStepsPerEpisode = 100
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -64,8 +64,8 @@ def setup_config_b_agent():
     swarm_param.isLearning = True
     swarm_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,  # モデルは後で設定
-        optimizer=None,  # オプティマイザは後で設定
+        model="actor-critic",  # モデルは後で設定
+        optimizer="adam",  # オプティマイザは後で設定
         gamma=0.99,
         learningLate=0.001,
         nStep=5

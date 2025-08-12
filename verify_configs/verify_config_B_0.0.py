@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Config_B 検証スクリプト (障害物密度: 0.0)
-SystemAgent: 学習なし、分岐・統合なし
-SwarmAgent: 学習あり
+Config_B 検証スクリプト (障害物密度: 0.003)
+System学習なし + Swarm学習あり
 """
 
 import os
@@ -38,8 +37,8 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 100  # 並列処理のため3回に削減
-    sim_param.maxStepsPerEpisode = 200
+    sim_param.episodeNum = 100
+    sim_param.maxStepsPerEpisode = 50
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -61,7 +60,7 @@ def setup_verification_environment():
     
     return sim_param
 
-def setup_config_b_agent():
+def setup_config_B_agent():
     """Config_B用エージェント設定"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
@@ -70,20 +69,20 @@ def setup_config_b_agent():
     
     agent_param = AgentParam()
     
-    # SystemAgent設定（学習なし、分岐・統合なし）
+    # SystemAgent設定
     system_param = SystemAgentParam()
     system_param.learningParameter = None
     system_param.branch_condition.branch_enabled = False
     system_param.integration_condition.integration_enabled = False
     agent_param.system_agent_param = system_param
     
-    # SwarmAgent設定（学習あり）
+    # SwarmAgent設定
     swarm_param = SwarmAgentParam()
     swarm_param.isLearning = True
     swarm_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,
-        optimizer=None,
+        model="actor-critic",
+        optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
         nStep=5
@@ -104,7 +103,7 @@ def run_verification():
         
         # 2. エージェント設定
         print("2. エージェント設定中...")
-        agent_param = setup_config_b_agent()
+        agent_param = setup_config_B_agent()
         print("✓ エージェント設定完了")
         
         # 3. 環境作成
@@ -124,8 +123,6 @@ def run_verification():
         model_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "trained_models/config_b/swarm_agent_model_1.h5")
         if not os.path.exists(model_path):
             print(f"❌ モデルファイルが見つかりません: {model_path}")
-            print(f"現在のディレクトリ: {os.getcwd()}")
-            print(f"絶対パス: {os.path.abspath(model_path)}")
             return
         
         from keras.utils import custom_object_scope
@@ -304,7 +301,7 @@ def run_verification():
         return False
 
 if __name__ == "__main__":
-    print("=== Config_B 検証開始 (障害物密度: 0.0) ===")
+    print("=== Config_B 検証開始 (障害物密度: 0.003) ===")
     print(f"開始時刻: {datetime.now()}")
     
     success = run_verification()
@@ -314,4 +311,4 @@ if __name__ == "__main__":
         print("🎉 検証が正常に完了しました！")
     else:
         print("❌ 検証が失敗しました。")
-        sys.exit(1) 
+        sys.exit(1)

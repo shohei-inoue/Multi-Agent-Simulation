@@ -1,0 +1,5 @@
+Config,Description,Density_0.0,Density_0.003,Density_0.005
+A,VFH-Fuzzy only,0.4533,0.4111,0.1952
+B,Pre-trained model,0.6309,0.1245,0.2006
+C,Branching/Integration,0.5941,0.5161,0.2414
+D,Branching/Integration + Learning,0.5582,0.3016,0.4303

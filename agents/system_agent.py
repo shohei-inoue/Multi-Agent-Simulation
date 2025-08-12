@@ -31,41 +31,155 @@ class SystemAgent(BaseAgent):
         # 学習情報の管理
         self.learning_history = {}  # swarm_id -> 学習情報のマッピング
         
-        # 分岐・統合のクールダウン
-        self.last_branch_time = 0
-        self.last_integration_time = 0
+        # 分岐・統合のクールダウン（ステップベース）
+        self.last_branch_step = -999  # 最初から分岐可能にする
+        self.last_integration_step = -999  # 最初から統合可能にする
+        self.current_step = 0
         
         # システム状態
         self.current_swarm_count = 1
-        self.branch_threshold = 0.5  # 学習対象
-        self.integration_threshold = 0.3  # 学習対象
+        self.branch_threshold = 0.5  # 分岐閾値（固定）
+        self.integration_threshold = 0.3  # 統合閾値（固定）
+        
+        # 学習による閾値調整のためのパラメータ
+        self.adaptive_branch_threshold = True  # 適応的分岐閾値
+        self.adaptive_integration_threshold = True  # 適応的統合閾値
+        
+        # 固定閾値設定
+        self.use_fixed_thresholds = getattr(param, 'use_fixed_thresholds', False)
+        self.fixed_branch_threshold = getattr(param, 'fixed_branch_threshold', 0.5)
+        self.fixed_integration_threshold = getattr(param, 'fixed_integration_threshold', 0.3)
+
+    def reset_episode(self):
+        """エピソード開始時にクールダウンをリセット"""
+        self.last_branch_step = -999  # エピソード開始時から分岐可能にする
+        self.last_integration_step = -999  # エピソード開始時から統合可能にする
+        self.current_step = 0
+        if self.debug and self.debug.log_branch_events:
+            print("SystemAgent: エピソードリセット - ステップカウンターリセット")
+
+    def update_step(self):
+        """ステップカウンターを更新"""
+        self.current_step += 1
+        if self.debug and self.debug.log_branch_events and self.current_step % 10 == 0:
+            print(f"📊 SystemAgent ステップ更新: current_step={self.current_step}, last_branch_step={self.last_branch_step}, last_integration_step={self.last_integration_step}")
 
     def check_branch(self, system_state: Dict[str, Any]) -> bool:
         """
         分岐条件をチェックし、条件を満たせば分岐を実行
         Returns: 分岐が実行されたかどうか
         """
-        # クールダウンチェック
-        current_time = time.time()
-        if current_time - self.last_branch_time < self.branchCondition.swarm_creation_cooldown:
+        # 分岐が無効になっている場合は分岐を実行しない
+        if not self.branchCondition.branch_enabled:
             return False
+        
+        # クールダウンチェックを無効化（毎ステップで分岐可能）
+        # if self.current_step - self.last_branch_step < self.branchCondition.swarm_creation_cooldown:
+        #     if self.debug and self.debug.log_branch_events:
+        #         print(f"🕒 分岐クールダウン中: {self.current_step - self.last_branch_step}/{self.branchCondition.swarm_creation_cooldown}ステップ")
+        #     return False
         
         # 分岐条件チェック
         follower_count = system_state.get("follower_count", 0)
         valid_directions = system_state.get("valid_directions", [])
         avg_mobility = system_state.get("avg_mobility", 0.0)
         
-        should_branch = (
+        # 分岐閾値の決定
+        if hasattr(self, 'use_fixed_thresholds') and self.use_fixed_thresholds:
+            # 固定閾値を使用（学習による閾値変更を防ぐ）
+            effective_threshold = self.fixed_branch_threshold
+        elif self.adaptive_branch_threshold and hasattr(self, 'model') and self.model is not None:
+            # 学習モデルがある場合は、現在のmobilityに基づいて閾値を調整
+            # mobilityが高い場合は閾値も高く、低い場合は閾値も低くする
+            
+            # 学習の進行度を考慮した閾値調整
+            # 学習が進むほど分岐を促進する（mobilityが高くても分岐しやすくする）
+            learning_progress_factor = 0.6  # 学習が進むと閾値を60%に下げる
+            
+            # 基本の適応閾値
+            adaptive_threshold = max(0.2, min(0.8, avg_mobility * 0.8 + 0.3))
+            
+            # 学習促進のための閾値調整
+            learning_enhanced_threshold = max(0.15, adaptive_threshold * learning_progress_factor)
+            
+            effective_threshold = learning_enhanced_threshold
+        else:
+            # 学習モデルがない場合は固定閾値を使用
+            effective_threshold = self.branch_threshold
+        
+        # 基本分岐条件
+        basic_branch_condition = (
             follower_count >= 3 and
             len(valid_directions) >= 2 and
-            avg_mobility >= self.branch_threshold
+            avg_mobility >= effective_threshold
         )
+        
+        # 追加分岐条件：学習が進んでいる場合の分岐促進
+        learning_branch_condition = False
+        if hasattr(self, 'model') and self.model is not None:
+            # 学習モデルがある場合、追加の分岐条件をチェック
+            # 学習によりmobilityが改善されている場合、より柔軟な分岐条件を適用
+            
+            # 1. 十分なfollowerがいる場合
+            # 2. 有効な方向が複数ある場合
+            # 3. 学習による改善を考慮した分岐条件
+            learning_branch_condition = (
+                follower_count >= 2 and  # より緩い条件
+                len(valid_directions) >= 2 and
+                (avg_mobility >= 0.2 or  # 低いmobilityでも分岐可能
+                 (follower_count >= 4 and len(valid_directions) >= 3))  # 十分なリソースがある場合
+            )
+        
+        # 学習による分岐促進：学習が進んでいる場合は基本条件を緩和
+        enhanced_basic_condition = False
+        if hasattr(self, 'model') and self.model is not None:
+            # 学習モデルがある場合、基本条件も緩和
+            enhanced_basic_condition = (
+                follower_count >= 2 and  # 3→2に緩和
+                len(valid_directions) >= 2 and
+                avg_mobility >= max(0.2, effective_threshold * 0.6)  # 閾値を60%に緩和
+            )
+        
+        # Config C用の初期分岐促進条件（mobility_scoreが低くても分岐可能）
+        initial_branch_condition = False
+        if hasattr(self, 'use_fixed_thresholds') and self.use_fixed_thresholds:
+            # 固定閾値使用時は、初期段階でも分岐を促進
+            initial_branch_condition = (follower_count >= 2 and len(valid_directions) >= 2 and avg_mobility >= 0.05)
+        
+        should_branch = basic_branch_condition or learning_branch_condition or enhanced_basic_condition or initial_branch_condition
+        
+        # デバッグ出力を追加
+        if self.debug and self.debug.log_branch_events:
+            print(f"🔍 分岐条件チェック (Step {self.current_step}): ")
+            if hasattr(self, 'use_fixed_thresholds') and self.use_fixed_thresholds:
+                print(f"   固定閾値使用: {effective_threshold:.3f}")
+            else:
+                print(f"   適応閾値使用: {effective_threshold:.3f}")
+            print(f"   基本条件: follower_count={follower_count}(≥3), valid_directions={len(valid_directions)}(≥2), avg_mobility={avg_mobility:.3f}(≥{effective_threshold:.3f})")
+            print(f"   学習条件: follower_count={follower_count}(≥2), avg_mobility={avg_mobility:.3f}(≥0.2) or (follower≥4 and directions≥3)")
+            print(f"   強化条件: follower_count={follower_count}(≥2), avg_mobility={avg_mobility:.3f}(≥{max(0.2, effective_threshold * 0.6):.3f})")
+            if hasattr(self, 'use_fixed_thresholds') and self.use_fixed_thresholds:
+                print(f"   初期促進: follower_count={follower_count}(≥2), avg_mobility={avg_mobility:.3f}(≥0.05)")
+            print(f"   結果: [基本:{basic_branch_condition}, 学習:{learning_branch_condition}, 強化:{enhanced_basic_condition}, 初期促進:{initial_branch_condition}]")
         
         if should_branch:
             # 分岐実行
+            if self.debug and self.debug.log_branch_events:
+                print(f"🌟 分岐実行 (Step {self.current_step})")
             self._execute_branch(system_state)
-            self.last_branch_time = current_time
+            self.last_branch_step = self.current_step
             return True
+        else:
+            if self.debug and self.debug.log_branch_events:
+                print(f"❌ 分岐条件不満足 (Step {self.current_step})")
+                print(f"   詳細分析:")
+                print(f"     基本条件: follower_count={follower_count}(要求≥3), valid_directions={len(valid_directions)}(要求≥2), avg_mobility={avg_mobility:.3f}(要求≥{effective_threshold:.3f})")
+                if hasattr(self, 'model') and self.model is not None:
+                    print(f"     学習条件: follower_count={follower_count}(要求≥2), avg_mobility={avg_mobility:.3f}(要求≥0.2) or (follower≥4 and directions≥3)")
+                    print(f"     強化条件: follower_count={follower_count}(要求≥2), avg_mobility={avg_mobility:.3f}(要求≥{max(0.2, effective_threshold * 0.6):.3f})")
+                    print(f"     学習促進: 閾値を{effective_threshold:.3f}に調整（基本閾値{self.branch_threshold:.3f}の{effective_threshold/self.branch_threshold*100:.1f}%）")
+                if hasattr(self, 'use_fixed_thresholds') and self.use_fixed_thresholds:
+                    print(f"     初期促進: follower_count={follower_count}(要求≥2), avg_mobility={avg_mobility:.3f}(要求≥0.05)")
         
         return False
 
@@ -74,10 +188,15 @@ class SystemAgent(BaseAgent):
         統合条件をチェックし、条件を満たせば統合を実行
         Returns: 統合が実行されたかどうか
         """
-        # クールダウンチェック
-        current_time = time.time()
-        if current_time - self.last_integration_time < self.integrationCondition.swarm_merge_cooldown:
+        # 統合が無効になっている場合は統合を実行しない
+        if not self.integrationCondition.integration_enabled:
             return False
+        
+        # クールダウンチェックを無効化（毎ステップで統合可能）
+        # if self.current_step - self.last_integration_step < self.integrationCondition.swarm_merge_cooldown:
+        #     if self.debug and self.debug.log_branch_events:
+        #         print(f"🕒 統合クールダウン中: {self.current_step - self.last_integration_step}/{self.integrationCondition.swarm_merge_cooldown}ステップ")
+        #     return False
         
         # 統合条件チェック
         avg_mobility = system_state.get("avg_mobility", 0.0)
@@ -107,13 +226,27 @@ class SystemAgent(BaseAgent):
                             break
         
         # 統合の確率を制御（20%の確率で統合を実行）
-        should_integrate = base_condition and has_overlapping_swarms and np.random.random() < 0.2
+        random_factor = np.random.random()
+        should_integrate = base_condition and has_overlapping_swarms and random_factor < 0.2
+        
+        # デバッグ出力を追加
+        if self.debug and self.debug.log_branch_events:
+            print(f"🔍 統合条件チェック (Step {self.current_step}): "
+                  f"swarm_count={swarm_count}(≥{self.integrationCondition.min_swarms_for_integration}), "
+                  f"avg_mobility={avg_mobility:.3f}(<{self.integration_threshold} or ≥5群), "
+                  f"has_overlapping={has_overlapping_swarms}, "
+                  f"random={random_factor:.3f}(<0.2)")
         
         if should_integrate:
             # 統合実行
+            if self.debug and self.debug.log_branch_events:
+                print(f"🔗 統合実行 (Step {self.current_step})")
             self._execute_integration(system_state)
-            self.last_integration_time = current_time
+            self.last_integration_step = self.current_step
             return True
+        else:
+            if self.debug and self.debug.log_branch_events:
+                print(f"❌ 統合条件不満足 (Step {self.current_step})")
         
         return False
 

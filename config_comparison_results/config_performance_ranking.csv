@@ -1,0 +1,13 @@
+Metric,Rank,Config,Value,Description
+Final Exploration Rate,1,A,0.3891,"VFH-Fuzzy only (No branching/integration, No learning)"
+Final Exploration Rate,2,C,0.3392,Branching/Integration enabled (No learning)
+Final Exploration Rate,3,D,0.2710,Branching/Integration + Learning
+Final Exploration Rate,4,B,0.2023,Pre-trained model (No branching/integration)
+Exploration Efficiency,1,A,0.007782,"VFH-Fuzzy only (No branching/integration, No learning)"
+Exploration Efficiency,2,C,0.006784,Branching/Integration enabled (No learning)
+Exploration Efficiency,3,D,0.005420,Branching/Integration + Learning
+Exploration Efficiency,4,B,0.004046,Pre-trained model (No branching/integration)
+Steps Taken (Lower is Better),1,A,50.0,"VFH-Fuzzy only (No branching/integration, No learning)"
+Steps Taken (Lower is Better),2,B,50.0,Pre-trained model (No branching/integration)
+Steps Taken (Lower is Better),3,C,50.0,Branching/Integration enabled (No learning)
+Steps Taken (Lower is Better),4,D,50.0,Branching/Integration + Learning

@@ -1,32 +1,65 @@
-# 学習システム (Learning System)
+# 学習システムとアルゴリズム構成 (Learning System and Algorithm Architecture)
 
 ## 概要
 
-学習システムは、群ロボットシステムにおける強化学習を統合的に管理するシステムです。SystemAgent と SwarmAgent の協調学習、分岐・統合時の学習情報の継承・統合、VFH-Fuzzy アルゴリズムのパラメータ最適化を実現します。
+本システムは、群ロボットシステムにおける強化学習と VFH-Fuzzy アルゴリズムを統合的に管理するシステムです。SystemAgent と SwarmAgent の協調学習、分岐・統合時の学習情報の継承・統合、VFH-Fuzzy アルゴリズムのパラメータ最適化を実現します。
 
-## 設計思想
+## システム構成
 
-### 1. 階層的学習
+### 1. エージェント階層
 
-- SystemAgent: 高レベル制御の学習
-- SwarmAgent: 低レベル行動の学習
-- 協調的な学習の実現
+```
+┌─────────────────┐
+│   SystemAgent   │  ← 高レベル制御（分岐・統合判定）
+│   (学習あり/なし) │
+└─────────┬───────┘
+          │
+    ┌─────▼─────┐
+    │ SwarmAgent│  ← 低レベル行動（移動方向決定）
+    │(学習あり/なし)│
+    └─────┬─────┘
+          │
+    ┌─────▼─────┐
+    │ VFH-Fuzzy │  ← 行動決定アルゴリズム
+    │ Algorithm │
+    └───────────┘
+```
 
-### 2. 学習情報の継承
+### 2. Config 別の設定
 
-- 分岐時の学習パラメータの引き継ぎ
-- 統合時の学習情報の統合
-- 知識の効率的な移転
+| Config | SystemAgent | SwarmAgent | 分岐・統合 | 学習モード         |
+| ------ | ----------- | ---------- | ---------- | ------------------ |
+| **A**  | 学習なし    | 学習なし   | 無効       | 固定パラメータ     |
+| **B**  | 学習なし    | 学習あり   | 無効       | 学習済みパラメータ |
+| **C**  | 学習あり    | 学習なし   | 有効       | 固定パラメータ     |
+| **D**  | 学習あり    | 学習あり   | 有効       | 学習済みパラメータ |
 
-### 3. 適応的パラメータ調整
+## 学習アルゴリズム
 
-- VFH-Fuzzy アルゴリズムの動的最適化
-- 衝突回避の学習
-- 探査効率の向上
+### 1. Actor-Critic (A2C)
 
-## アーキテクチャ
+```python
+class ActorCritic:
+    """Actor-Critic model for reinforcement learning"""
 
-### 1. 学習パラメータ管理
+    def __init__(self, state_size, action_size, learning_rate=0.001):
+        self.actor = self._build_actor(state_size, action_size)
+        self.critic = self._build_critic(state_size)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate)
+
+    def get_action(self, state):
+        """Get action from current state"""
+        state = np.array([state])
+        action_probs = self.actor.predict(state)[0]
+        action = np.random.choice(len(action_probs), p=action_probs)
+        return action, action_probs
+
+    def update(self, states, actions, rewards, next_states, dones):
+        """Update actor and critic networks"""
+        # Actor-Critic更新ロジック
+```
+
+### 2. 学習パラメータ管理
 
 ```python
 @dataclass
@@ -41,7 +74,7 @@ class LearningParameter:
     merge_learning_info: bool = True
 ```
 
-### 2. エージェント別学習設定
+### 3. エージェント別学習設定
 
 #### SystemAgent 学習設定
 
@@ -75,471 +108,452 @@ learningParameter: LearningParameter = LearningParameter(
 )
 ```
 
-## 学習アルゴリズム
+## VFH-Fuzzy アルゴリズム
 
-### 1. Actor-Critic (A2C)
+### 1. 基本パラメータ
+
+#### アルゴリズム定数
+
+- `BIN_SIZE_DEG`: ビンのサイズ（度）- デフォルト: 10 度
+- `BIN_NUM`: ビン数 - デフォルト: 36 個
+- `ANGLES`: 角度配列 - 0 から 2π まで均等分布
+
+#### 学習可能パラメータ
+
+- `th`: 抑制のしきい値（しきい値以下の drivability は抑制）
+- `k_e`: 探査逆方向の抑制強度
+- `k_c`: 衝突方向の抑制強度
+- `α`: ソフト抑制の鋭さ（固定: α=10.0）
+
+### 2. ヒストグラム生成
+
+#### 2.1 走行可能性ヒストグラム（Drivability）
 
 ```python
-class ActorCritic:
-    """Actor-Critic model for reinforcement learning"""
+def get_obstacle_density_histogram(self):
+    """
+    障害物密度に基づく走行可能性分布を生成
+    """
+    histogram = np.zeros(self.BIN_NUM)
 
-    def __init__(self, state_size, action_size, learning_rate=0.001):
-        self.actor = self._build_actor(state_size, action_size)
-        self.critic = self._build_critic(state_size)
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate)
+    # 前回衝突した方向を避ける
+    if self.last_collision_theta is not None:
+        collision_bin = int(self.last_collision_theta * self.BIN_NUM / (2 * np.pi)) % self.BIN_NUM
+        for i in range(self.BIN_NUM):
+            distance = min(abs(i - collision_bin), abs(i - collision_bin + self.BIN_NUM), abs(i - collision_bin - self.BIN_NUM))
+            if distance < 4:  # 前回衝突した方向の周辺4bin（40度範囲）を低評価
+                histogram[i] = 0.05
+            else:
+                histogram[i] = 1.0
+        return histogram
 
-    def get_action(self, state):
-        """Get action from current state"""
-        state = np.array([state])
-        action_probs = self.actor.predict(state)[0]
-        action = np.random.choice(len(action_probs), p=action_probs)
-        return action, action_probs
+    # フォロワーの衝突データのみを使用
+    histogram = np.ones(self.BIN_NUM, dtype=np.float32)
 
-    def update(self, states, actions, rewards, next_states, dones):
-        """Update actor and critic networks"""
-        # Actor-Critic更新ロジック
-        pass
+    for azimuth, distance in self.follower_collision_data:
+        if distance < 1e-6:
+            continue
+
+        azimuth_deg = azimuth % 360.0
+        bin_index = int(azimuth_deg) // self.BIN_SIZE_DEG
+
+        obstacle_weight = 1.0 / (distance + 1e-3)
+        histogram[bin_index] -= obstacle_weight
+
+    histogram = np.maximum(histogram, 0.01)
+    histogram += 1e-6
+    histogram /= np.sum(histogram)
+
+    return histogram
 ```
 
-### 2. VFH-Fuzzy パラメータ学習
+#### 2.2 探査向上性ヒストグラム（Exploration Improvement）
 
 ```python
-class VFHFuzzyLearning:
-    """Learning system for VFH-Fuzzy parameters"""
+def get_exploration_improvement_histogram(self) -> np.ndarray:
+    """
+    探査向上性に基づく探索欲求分布を生成
+    """
+    histogram = np.ones(self.BIN_NUM)
 
-    def update_params(self, th, k_e, k_c):
-        """Update VFH-Fuzzy parameters based on learning"""
-        self.th = th      # 閾値パラメータ
-        self.k_e = k_e    # 探査抑制パラメータ
-        self.k_c = k_c    # 衝突抑制パラメータ
+    def apply_direction_weight_gauss(base_azimuth: float, k: float, sharpness: float = 10.0):
+        """
+        base_azimuth方向を中心にガウス分布で【抑制】をかける
+        """
+        for i in range(self.BIN_NUM):
+            angle = 2 * np.pi * i / self.BIN_NUM
+            angle_diff = abs(angle - base_azimuth)
+            angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
 
-    def get_learning_reward(self, collision_flag, exploration_improvement):
-        """Calculate learning reward"""
-        reward = 0.0
+            decay = 1 - (1 - k) * np.exp(-sharpness * angle_diff ** 2)
+            histogram[i] *= decay
 
-        # 衝突ペナルティ
-        if collision_flag:
-            reward -= 5.0
+    def apply_direction_weight_von(base_azimuth: float, kappa: float):
+        """
+        von Mises分布による方向重みの適用
+        """
+        for i in range(self.BIN_NUM):
+            angle = 2 * np.pi * i / self.BIN_NUM
+            angle_diff = abs(angle - base_azimuth)
+            angle_diff = min(angle_diff, 2 * np.pi - angle_diff)
 
-        # 探査向上報酬
-        reward += exploration_improvement * 10.0
+            decay = np.exp(kappa * np.cos(angle_diff)) / (2 * np.pi * i0(kappa))
+            histogram[i] *= decay
 
-        return reward
+    # 探査逆方向（過去方向）の抑制
+    if hasattr(self, 'agent_azimuth') and self.agent_azimuth is not None:
+        apply_direction_weight_gauss(self.agent_azimuth, self.k_e)
+
+    # 衝突方向の抑制
+    if hasattr(self, 'agent_azimuth') and self.agent_azimuth is not None:
+        apply_direction_weight_von(self.agent_azimuth, self.k_c)
+
+    histogram += 1e-6
+    histogram /= np.sum(histogram)
+
+    return histogram
 ```
 
-## 学習フロー
+### 3. ファジィ推論
 
-### 1. SwarmAgent 学習フロー
+#### 3.1 ソフト抑制付きファジィ推論
 
 ```python
-def swarm_agent_learning_flow(self, state, action, reward, next_state):
-    """SwarmAgent learning flow"""
+def get_final_result_histogram(self, drivability, exploration_improvement) -> np.ndarray:
+    """
+    ファジィ推論に基づき、方向ごとのスコアを統合したヒストグラムを返す
+    """
+    fused_score = np.zeros(self.BIN_NUM, dtype=np.float32)
 
-    # 1. 状態の観測
-    observation = self.get_observation(state)
+    # 元々の設計パラメータ
+    alpha = 10.0  # ソフト抑制の鋭さ
 
-    # 2. 行動の選択
-    theta, valid_directions = self.algorithm.policy(observation, self.learning_params)
+    for bin in range(self.BIN_NUM):
+        drive_val = drivability[bin]
+        explore_val = exploration_improvement[bin]
 
-    # 3. 環境での実行
-    next_state, reward, done = self.env.step({"theta": theta})
+        # ソフト抑制係数
+        suppression = 1 / (1 + np.exp(-alpha * (drive_val - self.th)))
 
-    # 4. 学習パラメータの更新
-    self.update_learning_params(reward)
+        # ファジィ積推論
+        fused_score[bin] = suppression * drive_val * explore_val
 
-    # 5. VFH-Fuzzyパラメータの調整
-    self.algorithm.update_params(self.th, self.k_e, self.k_c)
+    fused_score += 1e-6
+    fused_score /= np.sum(fused_score)
+
+    return fused_score
 ```
 
-### 2. SystemAgent 学習フロー
+### 4. 方向選択
+
+#### 4.1 重み付けサンプリング
 
 ```python
-def system_agent_learning_flow(self, swarm_state):
-    """SystemAgent learning flow"""
+def select_final_direction_by_weighted_sampling(self, result: np.ndarray) -> float:
+    """
+    四分位数ベースの重み付けサンプリング
+    """
+    q1, q2, q3 = np.quantile(result, [0.25, 0.5, 0.75])
 
-    # 1. システム状態の観測
-    system_observation = self.get_system_observation(swarm_state)
+    bins_very_good = [i for i, score in enumerate(result) if score >= q3]
+    bins_good = [i for i, score in enumerate(result) if q2 <= score < q3]
+    bins_okay = [i for i, score in enumerate(result) if q1 <= score < q2]
 
-    # 2. 分岐・統合の判断
-    branch_action = self.check_branch(system_observation)
-    integration_action = self.check_integration(system_observation)
+    bins = bins_very_good + bins_good + bins_okay
 
-    # 3. 行動の実行
-    if branch_action:
-        self.execute_branch(branch_action)
-    elif integration_action:
-        self.execute_integration(integration_action)
+    if not bins:
+        # フォールバック: ランダム方向
+        fallback_theta = np.random.uniform(0, 2 * np.pi)
+        return fallback_theta
 
-    # 4. システム報酬の計算
-    system_reward = self.calculate_system_reward(swarm_state)
+    # 元々の設計の重み付け
+    score_q1 = 0.6 if bins_very_good else 0.0  # Very Good: 60%
+    score_q2 = 0.25 if bins_good else 0.0      # Good: 25%
+    score_q3 = 0.15 if bins_okay else 0.0      # Okay: 15%
 
-    # 5. 学習パラメータの更新
-    self.update_learning_params(system_reward)
+    total_score = score_q1 + score_q2 + score_q3
+
+    # 正規化
+    score_q1 /= total_score if total_score > 0 else 1.0
+    score_q2 /= total_score if total_score > 0 else 1.0
+    score_q3 /= total_score if total_score > 0 else 1.0
+
+    # 重みに従って構築
+    weights = []
+    if bins_very_good:
+        weights += [score_q1 / len(bins_very_good)] * len(bins_very_good)
+    if bins_good:
+        weights += [score_q2 / len(bins_good)] * len(bins_good)
+    if bins_okay:
+        weights += [score_q3 / len(bins_okay)] * len(bins_okay)
+
+    selected_bin = np.random.choice(bins, p=weights)
+    selected_angle = 2 * np.pi * selected_bin / self.BIN_NUM
+
+    return selected_angle
+```
+
+## 学習モードの違い
+
+### 1. 学習なしモード（Config A & C）
+
+```python
+# SwarmAgent.get_action() - 学習なしモード
+if not self.isLearning or self.model is None:
+    # デフォルトのパラメータを使用してアルゴリズムを実行
+    default_params = np.array([0.5, 10.0, 5.0])  # th, k_e, k_c
+    theta, valid_directions = self.algorithm.policy(state, default_params)
+
+    # 分岐・統合条件の判定
+    follower_scores = state.get("follower_mobility_scores", [])
+    follower_count = len(follower_scores)
+    avg_mobility = np.mean(follower_scores) if follower_count > 0 else 0.0
+
+    # SystemAgentから閾値を取得
+    branch_threshold = 0.5  # デフォルト値
+    integration_threshold = 0.3  # デフォルト値
+
+    should_branch = (
+        follower_count >= 3 and
+        valid_directions and len(valid_directions) >= 2 and
+        avg_mobility >= branch_threshold
+    )
+    should_integrate = avg_mobility < integration_threshold
+
+    # 分岐・統合判定
+    if self.system_agent and should_branch:
+        self.system_agent.check_branch(system_state)
+    if self.system_agent and should_integrate:
+        self.system_agent.check_integration(system_state)
+
+    return {"theta": theta}, {
+        'theta': theta,
+        'valid_directions': valid_directions
+    }
+```
+
+### 2. 学習ありモード（Config B & D）
+
+```python
+# SwarmAgent.get_action() - 学習ありモード
+assert self.model is not None, "model must not be None"
+
+# 状態をテンソルに変換
+state_vec = tf.convert_to_tensor([flatten_state(state)], dtype=tf.float32)
+
+# モデルから学習パラメータとアクションパラメータを取得
+learning_mu, learning_std, theta_mu, theta_std, value = self.model(state_vec)
+
+# 学習パラメータをサンプリング
+learning_params = self.model.sample_learning_params(learning_mu, learning_std)
+
+# アルゴリズムに学習パラメータを渡してポリシーを実行
+theta, valid_directions = self.algorithm.policy(state, learning_params)
+
+# アクション（theta）をサンプリング
+action_theta = self.model.sample_action(theta_mu, theta_std)
+
+# 学習ログを記録
+if log_dir and hasattr(self, 'logger'):
+    self._log_learning_metrics(episode, {
+        'learning_th': float(learning_params[0]),
+        'learning_k_e': float(learning_params[1]),
+        'learning_k_c': float(learning_params[2]),
+        'action_theta': float(action_theta),
+        'value': float(value),
+        'valid_directions_count': len(valid_directions)
+    }, log_dir)
+
+return {"theta": theta_value}, {
+    'theta': float(action_theta) if not isinstance(action_theta, tuple) else float(action_theta[0]),
+    'learning_params': learning_params.numpy().tolist() if hasattr(learning_params, 'numpy') else list(learning_params),
+    'valid_directions': valid_directions,
+    'value': float(value)
+}
+```
+
+## 分岐・統合システム
+
+### 1. 分岐条件
+
+```python
+def check_branch(self, system_state: Dict[str, Any]) -> bool:
+    """
+    分岐条件をチェックし、条件を満たせば分岐を実行
+    """
+    # 分岐が無効になっている場合は分岐を実行しない
+    if not self.branchCondition.branch_enabled:
+        return False
+
+    # クールダウンチェック
+    current_time = time.time()
+    if current_time - self.last_branch_time < self.branchCondition.swarm_creation_cooldown:
+        return False
+
+    # 分岐条件チェック
+    follower_count = system_state.get("follower_count", 0)
+    valid_directions = system_state.get("valid_directions", [])
+    avg_mobility = system_state.get("avg_mobility", 0.0)
+
+    should_branch = (
+        follower_count >= 3 and
+        len(valid_directions) >= 2 and
+        avg_mobility >= self.branch_threshold
+    )
+
+    if should_branch:
+        # 分岐実行
+        self._execute_branch(system_state)
+        self.last_branch_time = current_time
+        return True
+
+    return False
+```
+
+### 2. 統合条件
+
+```python
+def check_integration(self, system_state: Dict[str, Any]) -> bool:
+    """
+    統合条件をチェックし、条件を満たせば統合を実行
+    """
+    # 統合が無効になっている場合は統合を実行しない
+    if not self.integrationCondition.integration_enabled:
+        return False
+
+    # クールダウンチェック
+    current_time = time.time()
+    if current_time - self.last_integration_time < self.integrationCondition.swarm_merge_cooldown:
+        return False
+
+    # 統合条件チェック
+    avg_mobility = system_state.get("avg_mobility", 0.0)
+    swarm_count = system_state.get("swarm_count", 1)
+
+    base_condition = (
+        swarm_count >= self.integrationCondition.min_swarms_for_integration and
+        (avg_mobility < self.integration_threshold or swarm_count >= 5)
+    )
+
+    # 探査領域の重複チェック
+    has_overlapping_swarms = False
+    if base_condition and hasattr(self.env, 'check_exploration_area_overlap'):
+        swarm_id = system_state.get("swarm_id")
+        if swarm_id is not None:
+            for target_swarm_id in self.swarm_agents.keys():
+                if target_swarm_id != swarm_id:
+                    if self.env.check_exploration_area_overlap(swarm_id, target_swarm_id):
+                        has_overlapping_swarms = True
+                        break
+
+    # 統合の確率を制御（20%の確率で統合を実行）
+    should_integrate = base_condition and has_overlapping_swarms and np.random.random() < 0.2
+
+    if should_integrate:
+        # 統合実行
+        self._execute_integration(system_state)
+        self.last_integration_time = current_time
+        return True
+
+    return False
 ```
 
 ## 学習情報の継承・統合
 
-### 1. 分岐時の学習継承
+### 1. 分岐時の学習情報継承
 
 ```python
-def inherit_learning_info(self, source_swarm, new_swarm):
-    """Inherit learning information during branching"""
+def _inherit_learning_info(self, source_swarm_id: int) -> Dict[str, Any]:
+    """
+    分岐元の学習情報を継承
+    """
+    if source_swarm_id in self.learning_history:
+        source_info = self.learning_history[source_swarm_id].copy()
 
-    # 学習パラメータの継承
-    if hasattr(source_swarm, 'learning_params'):
-        new_swarm.learning_params = source_swarm.learning_params.copy()
+        # 学習パラメータの微調整
+        if 'learning_params' in source_info:
+            source_info['learning_params'] = self._adjust_learning_params(
+                source_info['learning_params']
+            )
 
-    # VFH-Fuzzyパラメータの継承
-    if hasattr(source_swarm, 'algorithm'):
-        new_swarm.algorithm.th = source_swarm.algorithm.th
-        new_swarm.algorithm.k_e = source_swarm.algorithm.k_e
-        new_swarm.algorithm.k_c = source_swarm.algorithm.k_c
+        return source_info
+    else:
+        return self._get_default_learning_info()
+```
 
-    # 経験バッファの共有
-    if hasattr(source_swarm, 'experience_buffer'):
-        shared_experience = source_swarm.experience_buffer.sample(
-            size=min(100, len(source_swarm.experience_buffer))
+### 2. 統合時の学習情報統合
+
+```python
+def _merge_learning_info(self, source_swarm_id: int, target_swarm_id: int):
+    """
+    統合時の学習情報を統合
+    """
+    if source_swarm_id in self.learning_history and target_swarm_id in self.learning_history:
+        source_info = self.learning_history[source_swarm_id]
+        target_info = self.learning_history[target_swarm_id]
+
+        # 学習パラメータの平均化
+        merged_params = self._average_learning_params(
+            source_info.get('learning_params', []),
+            target_info.get('learning_params', [])
         )
-        new_swarm.experience_buffer.extend(shared_experience)
-```
 
-### 2. 統合時の学習統合
+        # 統合された情報を保存
+        target_info['learning_params'] = merged_params
+        target_info['merged_from'] = source_swarm_id
 
-```python
-def merge_learning_info(self, source_swarm, target_swarm):
-    """Merge learning information during integration"""
-
-    # 重み付き平均による統合
-    source_weight = 0.3
-    target_weight = 0.7
-
-    # 学習パラメータの統合
-    for param_name in ['th', 'k_e', 'k_c']:
-        if hasattr(source_swarm.algorithm, param_name) and hasattr(target_swarm.algorithm, param_name):
-            source_value = getattr(source_swarm.algorithm, param_name)
-            target_value = getattr(target_swarm.algorithm, param_name)
-
-            merged_value = (source_value * source_weight + target_value * target_weight)
-            setattr(target_swarm.algorithm, param_name, merged_value)
-
-    # 経験バッファの統合
-    if hasattr(source_swarm, 'experience_buffer') and hasattr(target_swarm, 'experience_buffer'):
-        shared_experience = source_swarm.experience_buffer.sample(
-            size=min(50, len(source_swarm.experience_buffer))
-        )
-        target_swarm.experience_buffer.extend(shared_experience)
-```
-
-## 報酬設計
-
-### 1. SwarmAgent 報酬
-
-```python
-def calculate_swarm_reward(self, collision_flag, exploration_improvement, movement_distance):
-    """Calculate reward for SwarmAgent"""
-    reward = 0.0
-
-    # 衝突ペナルティ
-    if collision_flag:
-        reward -= 5.0
-
-    # 探査向上報酬
-    reward += exploration_improvement * 10.0
-
-    # 移動距離報酬
-    reward += movement_distance * 0.1
-
-    return reward
-```
-
-### 2. SystemAgent 報酬
-
-```python
-def calculate_system_reward(self, swarm_state):
-    """Calculate reward for SystemAgent"""
-    reward = 0.0
-
-    # 探査効率報酬
-    exploration_efficiency = swarm_state.get('exploration_efficiency', 0.0)
-    reward += exploration_efficiency * 10.0
-
-    # 群数バランス報酬
-    swarm_count_balance = self.calculate_swarm_count_balance()
-    reward += swarm_count_balance * 2.0
-
-    # 移動性スコア報酬
-    mobility_score = swarm_state.get('mobility_score', 0.0)
-    reward += mobility_score * 5.0
-
-    # 学習移転成功報酬
-    if self.learning_transfer_success:
-        reward += 3.0
-
-    # システム安定性報酬
-    system_stability = self.calculate_system_stability()
-    reward += system_stability * 2.0
-
-    return reward
-```
-
-## 学習パラメータの最適化
-
-### 1. VFH-Fuzzy パラメータ
-
-#### 閾値パラメータ (th)
-
-```python
-def update_threshold_parameter(self, reward, current_th):
-    """Update threshold parameter based on reward"""
-    if reward > 0:
-        # 良い報酬の場合、閾値を上げてより厳格にする
-        new_th = current_th + 0.01
-    else:
-        # 悪い報酬の場合、閾値を下げてより寛容にする
-        new_th = current_th - 0.01
-
-    return np.clip(new_th, 0.1, 0.9)
-```
-
-#### 探査抑制パラメータ (k_e)
-
-```python
-def update_exploration_parameter(self, reward, current_k_e):
-    """Update exploration parameter based on reward"""
-    if reward > 0:
-        # 良い報酬の場合、探査を促進
-        new_k_e = current_k_e - 0.1
-    else:
-        # 悪い報酬の場合、探査を抑制
-        new_k_e = current_k_e + 0.1
-
-    return np.clip(new_k_e, 0.1, 5.0)
-```
-
-#### 衝突抑制パラメータ (k_c)
-
-```python
-def update_collision_parameter(self, collision_flag, current_k_c):
-    """Update collision parameter based on collision"""
-    if collision_flag:
-        # 衝突が発生した場合、衝突抑制を強化
-        new_k_c = current_k_c + 0.2
-    else:
-        # 衝突がない場合、衝突抑制を緩和
-        new_k_c = current_k_c - 0.05
-
-    return np.clip(new_k_c, 0.1, 5.0)
-```
-
-### 2. 学習率の動的調整
-
-```python
-def adjust_learning_rate(self, episode, base_learning_rate=0.001):
-    """Dynamically adjust learning rate"""
-    # エピソード数に応じて学習率を減衰
-    decay_rate = 0.995
-    adjusted_lr = base_learning_rate * (decay_rate ** episode)
-
-    return max(adjusted_lr, 0.0001)  # 最小学習率を保証
-```
-
-## 学習の監視と評価
-
-### 1. 学習メトリクス
-
-```python
-class LearningMetrics:
-    """Learning metrics for monitoring"""
-
-    def __init__(self):
-        self.episode_rewards = []
-        self.exploration_rates = []
-        self.collision_rates = []
-        self.parameter_changes = []
-
-    def update_metrics(self, episode, reward, exploration_rate, collision_rate, params):
-        """Update learning metrics"""
-        self.episode_rewards.append(reward)
-        self.exploration_rates.append(exploration_rate)
-        self.collision_rates.append(collision_rate)
-        self.parameter_changes.append(params)
-
-    def get_learning_progress(self):
-        """Get learning progress summary"""
-        return {
-            'avg_reward': np.mean(self.episode_rewards[-100:]),  # 最近100エピソード
-            'avg_exploration_rate': np.mean(self.exploration_rates[-100:]),
-            'avg_collision_rate': np.mean(self.collision_rates[-100:]),
-            'parameter_trend': self.analyze_parameter_trend()
-        }
-```
-
-### 2. 学習の可視化
-
-```python
-def visualize_learning_progress(self, metrics):
-    """Visualize learning progress"""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-
-    # 報酬の推移
-    axes[0, 0].plot(metrics.episode_rewards)
-    axes[0, 0].set_title('Episode Rewards')
-    axes[0, 0].set_xlabel('Episode')
-    axes[0, 0].set_ylabel('Reward')
-
-    # 探査率の推移
-    axes[0, 1].plot(metrics.exploration_rates)
-    axes[0, 1].set_title('Exploration Rate')
-    axes[0, 1].set_xlabel('Episode')
-    axes[0, 1].set_ylabel('Exploration Rate')
-
-    # 衝突率の推移
-    axes[1, 0].plot(metrics.collision_rates)
-    axes[1, 0].set_title('Collision Rate')
-    axes[1, 0].set_xlabel('Episode')
-    axes[1, 0].set_ylabel('Collision Rate')
-
-    # パラメータの推移
-    params = np.array(metrics.parameter_changes)
-    axes[1, 1].plot(params[:, 0], label='th')
-    axes[1, 1].plot(params[:, 1], label='k_e')
-    axes[1, 1].plot(params[:, 2], label='k_c')
-    axes[1, 1].set_title('Parameter Changes')
-    axes[1, 1].set_xlabel('Episode')
-    axes[1, 1].set_ylabel('Parameter Value')
-    axes[1, 1].legend()
-
-    plt.tight_layout()
-    plt.show()
-```
-
-## 設定パラメータ
-
-### 1. 学習パラメータ
-
-```python
-# 本格的な学習設定
-episodeNum: int = 100
-maxStepsPerEpisode: int = 50
-
-# SwarmAgent学習設定
-swarm_learning_params = LearningParameter(
-    type="a2c",
-    model="actor-critic",
-    optimizer="adam",
-    gamma=0.99,
-    learningLate=0.001,
-    nStep=5,
-    inherit_learning_info=True,
-    merge_learning_info=True
-)
-
-# SystemAgent学習設定
-system_learning_params = LearningParameter(
-    type="a2c",
-    model="actor-critic",
-    optimizer="adam",
-    gamma=0.99,
-    learningLate=0.001,
-    nStep=10,
-    inherit_learning_info=True,
-    merge_learning_info=True
-)
-```
-
-### 2. VFH-Fuzzy 初期パラメータ
-
-```python
-# VFH-Fuzzy初期パラメータ
-initial_th = 0.3    # 初期閾値
-initial_k_e = 1.0   # 初期探査抑制パラメータ
-initial_k_c = 1.0   # 初期衝突抑制パラメータ
-```
-
-## 使用例
-
-### 1. 基本的な学習設定
-
-```python
-# 学習パラメータの設定
-learning_params = LearningParameter(
-    type="a2c",
-    model="actor-critic",
-    optimizer="adam",
-    gamma=0.99,
-    learningLate=0.001,
-    nStep=5
-)
-
-# SwarmAgentの作成
-swarm_agent = SwarmAgent(
-    swarm_id=1,
-    learning_params=learning_params,
-    algorithm="vfh_fuzzy"
-)
-```
-
-### 2. 学習の実行
-
-```python
-# 学習ループ
-for episode in range(100):
-    state = env.reset()
-
-    for step in range(50):
-        # 行動の選択
-        action = swarm_agent.get_action(state)
-
-        # 環境での実行
-        next_state, reward, done = env.step(action)
-
-        # 学習の更新
-        swarm_agent.update_learning_params(reward)
-
-        state = next_state
-        if done:
-            break
-
-    # エピソード終了時の処理
-    swarm_agent.end_episode()
+        # ソースの学習情報を削除
+        del self.learning_history[source_swarm_id]
 ```
 
 ## パフォーマンス最適化
 
-### 1. 学習効率の向上
+### 1. メモリ効率
 
-- 経験リプレイバッファの活用
-- 優先度付きサンプリング
-- バッチ学習の最適化
+- 学習履歴の定期的なクリーンアップ
+- 不要なデータの自動削除
+- メモリ使用量の監視
 
-### 2. メモリ効率
+### 2. 計算効率
 
-- 不要な経験データの削除
-- 学習パラメータの効率的な保存
-- メモリリークの防止
+- バッチ処理による学習の効率化
+- 並列処理によるシミュレーション加速
+- キャッシュ機能による重複計算の回避
 
-### 3. 計算効率
+### 3. 学習効率
 
-- GPU 活用の最適化
-- 並列学習の実装
-- 学習更新の非同期化
+- 適応的学習率調整
+- 早期停止条件の実装
+- 学習進捗の可視化
 
-## 今後の拡張
+## 今後の改善方向
 
-### 1. 新しい学習アルゴリズム
+### 1. 動的パラメータ調整
 
-- PPO (Proximal Policy Optimization)
-- SAC (Soft Actor-Critic)
-- TD3 (Twin Delayed DDPG)
+- 環境状態に応じたリアルタイム調整
+- 探査進捗に基づく動的閾値調整
+- 群の状態に応じた制御パラメータ調整
 
-### 2. メタ学習の導入
+### 2. 階層的学習
 
-- 環境適応の高速化
-- 転移学習の強化
-- 少数サンプル学習
+- 個体レベルと群レベルの同時最適化
+- 群制御と個体行動の協調学習
+- マルチスケール最適化
 
-### 3. 分散学習の実装
+### 3. メタ学習
 
-- マルチエージェント学習
-- フェデレーテッド学習
-- 分散最適化
+- 様々な環境への適応能力の向上
+- 環境特性の自動認識
+- 汎用的な最適化戦略の学習
+
+### 4. 多群最適化
+
+- 複数群の協調的最適化
+- 群間の競合と協調のバランス
+- 大規模群システムの最適化
+
+### 5. 予測的群制御
+
+- 将来の動きやすさ予測
+- 予防的な群再編成
+- 長期的な効率最適化

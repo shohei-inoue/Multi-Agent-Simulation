@@ -38,8 +38,8 @@ def setup_verification_environment():
     sim_param = SimulationParam()
     
     # 基本設定
-    sim_param.episodeNum = 5
-    sim_param.maxStepsPerEpisode = 10
+    sim_param.episodeNum = 10
+    sim_param.maxStepsPerEpisode = 50
     
     # 環境設定
     sim_param.environment.map.width = 200
@@ -62,20 +62,21 @@ def setup_verification_environment():
     return sim_param
 
 def setup_config_d_agent():
-    """Config_D用エージェント設定"""
+    """Config_D用エージェント設定（学習済みモデルなし）"""
     from params.agent import AgentParam
     from params.system_agent import SystemAgentParam
     from params.swarm_agent import SwarmAgentParam
     from params.learning import LearningParameter
+    from params.debug import DebugParam
     
     agent_param = AgentParam()
     
-    # SystemAgent設定（学習あり、分岐・統合あり）
+    # SystemAgent設定（新しいモデルで学習、分岐・統合あり）
     system_param = SystemAgentParam()
     system_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,
-        optimizer=None,
+        model="actor-critic",
+        optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
         nStep=5
@@ -84,13 +85,13 @@ def setup_config_d_agent():
     system_param.integration_condition.integration_enabled = True
     agent_param.system_agent_param = system_param
     
-    # SwarmAgent設定（学習あり）
+    # SwarmAgent設定（新しいモデルで学習）
     swarm_param = SwarmAgentParam()
     swarm_param.isLearning = True
     swarm_param.learningParameter = LearningParameter(
         type="A2C",
-        model=None,
-        optimizer=None,
+        model="actor-critic",
+        optimizer="adam",
         gamma=0.99,
         learningLate=0.001,
         nStep=5
@@ -126,61 +127,21 @@ def run_verification():
         system_agent, swarm_agents = create_initial_agents(env, agent_param)
         print(f"✓ エージェント作成完了 - SwarmAgents: {len(swarm_agents)}")
         
-        # 5. 学習済みモデルの読み込み
-        print("5. 学習済みモデル読み込み中...")
+        # 5. 新しいモデルで学習開始（学習済みモデルは使用しない）
+        print("5. 新しいモデルで学習設定中...")
         
-        # 学習済みモデルの入力次元数を使用（学習時と同じ）
-        input_dim = 35  # 学習済みモデルの実際の入力次元数
-        
-        # SystemAgentモデル読み込み
-        system_model_path = "trained_models/config_d/system_agent_model_1.h5"
-        if os.path.exists(system_model_path):
-            print(f"  ✅ SystemAgent モデル読み込み中: {system_model_path}")
-            from keras.utils import custom_object_scope
-            from models.system_actor_critic import SystemActorCritic
-            
-            # 学習済みモデルを同じ構造で作成してから重みを読み込み
-            trained_system_model = SystemActorCritic(input_dim)
-            
-            # モデルをビルド（重みを読み込む前に必要）
-            import tensorflow as tf
-            dummy_input = tf.zeros((1, input_dim))
-            _ = trained_system_model(dummy_input)
-            
-            # 重みを読み込み
-            with custom_object_scope({'SystemActorCritic': SystemActorCritic}):
-                trained_system_model.load_weights(system_model_path)
-            
-            system_agent.model = trained_system_model
-            print(f"  ✓ SystemAgent モデル読み込み完了")
+        # SystemAgentの学習設定確認
+        if system_agent.isLearning:
+            print("  ✓ SystemAgent: 学習モード（新しいモデルで学習開始）")
         else:
-            print(f"  ⚠️ SystemAgent モデルファイルが見つかりません: {system_model_path}")
-        
-        # SwarmAgentモデル読み込み
-        swarm_model_path = "trained_models/config_d/swarm_agent_model_1.h5"
-        if os.path.exists(swarm_model_path):
-            print(f"  ✅ SwarmAgent モデル読み込み中: {swarm_model_path}")
-            from models.swarm_actor_critic import SwarmActorCritic
-            from keras.utils import custom_object_scope
-            import tensorflow as tf
+            print("  ✓ SystemAgent: 学習なしモード")
             
-            # 学習済みモデルを同じ構造で作成してから重みを読み込み
-            trained_swarm_model = SwarmActorCritic(input_dim)
-            
-            # モデルをビルド（重みを読み込む前に必要）
-            dummy_input = tf.zeros((1, input_dim))
-            _ = trained_swarm_model(dummy_input)
-            
-            # 重みを読み込み
-            with custom_object_scope({'SwarmActorCritic': SwarmActorCritic}):
-                trained_swarm_model.load_weights(swarm_model_path)
-            
-            for swarm_id, agent in swarm_agents.items():
-                agent.model = trained_swarm_model
-                # agent.paramは既に設定済みなので設定不要
-                print(f"  ✓ SwarmAgent {swarm_id} モデル読み込み完了")
-        else:
-            print(f"  ⚠️ SwarmAgent モデルファイルが見つかりません: {swarm_model_path}")
+        # SwarmAgentの学習設定確認  
+        for swarm_id, agent in swarm_agents.items():
+            if agent.isLearning:
+                print(f"  ✓ SwarmAgent {swarm_id}: 学習モード（新しいモデルで学習開始）")
+            else:
+                print(f"  ✓ SwarmAgent {swarm_id}: 学習なしモード")
         
         # 6. SystemAgentを環境に設定
         print("6. SystemAgentを環境に設定中...")
@@ -193,6 +154,7 @@ def run_verification():
         print(f"✓ 出力ディレクトリ作成: {output_dir}")
         
         # 7. エピソード実行
+        print("7. エピソード実行中（学習しながら実行）...")
         results = []
         for episode in range(sim_param.episodeNum):
             print(f"\n--- エピソード {episode + 1}/{sim_param.episodeNum} ---")
@@ -246,7 +208,12 @@ def run_verification():
                         swarm_agents[swarm_id] = new_swarm_agent
                         # SystemAgentに新しいSwarmAgentを登録
                         system_agent.register_swarm_agent(new_swarm_agent, swarm_id)
-                        print(f"✓ SwarmAgent {swarm_id} 作成完了")
+                        
+                        # 新しいSwarmAgentのactionを即座に生成
+                        new_swarm_observation = env.get_swarm_agent_observation(swarm_id)
+                        action_tensor, action_dict = new_swarm_agent.get_action(new_swarm_observation)
+                        swarm_actions[swarm_id] = action_dict
+                        print(f"✓ SwarmAgent {swarm_id} 作成完了 - 初期action生成: theta={np.rad2deg(action_dict.get('theta', 0)):.1f}°")
                 
                 # ステップ実行（actionsを統合）
                 all_actions = {**swarm_actions}  # swarm_actionsをコピー

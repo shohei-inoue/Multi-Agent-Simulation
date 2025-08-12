@@ -30,7 +30,7 @@ class BranchConditionParam:
     branch_learning_inheritance: bool = True
     branch_leader_selection_method: str = "highest_score"
     branch_follower_selection_method: str = "random"
-    swarm_creation_cooldown: float = 5.0
+    swarm_creation_cooldown: int = 5  # ステップ数ベース
     next_swarm_id: int = 2
     branch_algorithm: str = "random"
 
@@ -44,7 +44,7 @@ class IntegrationConditionParam:
     integration_learning_merge: bool = True
     integration_target_selection: str = "nearest"
     integration_learning_merge_method: str = "weighted_average"
-    swarm_merge_cooldown: float = 3.0
+    swarm_merge_cooldown: int = 3  # ステップ数ベース
     integration_algorithm: str = "nearest"
 
 
@@ -73,6 +73,11 @@ class SystemAgentParam:
     # 分岐・統合設定
     branch_condition: Optional[BranchConditionParam] = None
     integration_condition: Optional[IntegrationConditionParam] = None
+    
+    # 固定閾値設定（学習なしの場合）
+    fixed_branch_threshold: float = 0.5
+    fixed_integration_threshold: float = 0.3
+    use_fixed_thresholds: bool = False  # 固定閾値を使用するかどうか
     
     # デバッグ設定
     debug: Optional[SystemAgentDebugParam] = None
